@@ -1,0 +1,1352 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>EasyFlow</title>
+    <style>
+      :root {
+        --bg: #f4f5f7;
+        --surface: #ffffff;
+        --surface-2: #ebedf0;
+        --border: #e5e7eb;
+        --border-strong: #d1d5db;
+        --text: #1f1f1f;
+        --text-muted: #6b7280;
+        --accent: #2563eb;
+        --accent-strong: #1d4ed8;
+        --danger: #ef4444;
+        --radius: 8px;
+        --radius-sm: 6px;
+        --gap: 10px;
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+      html,
+      body {
+        margin: 0;
+        padding: 0;
+        background: var(--bg);
+        color: var(--text);
+        font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI',
+          Roboto, sans-serif;
+        font-size: 12px;
+      }
+
+      .toggle-header {
+        display: flex;
+        align-items: center;
+        justify-content: flex-start;
+        gap: 8px;
+      }
+      .toggle-header .toggle-row {
+        flex: 1;
+        min-width: 0;
+      }
+      /* Sections */
+      .section {
+        background: var(--surface);
+        padding: 12px 14px;
+        border-bottom: 1px solid var(--border);
+      }
+      .section.muted {
+        background: var(--surface-2);
+      }
+      .row {
+        display: flex;
+        align-items: center;
+        gap: var(--gap);
+      }
+      .row + .row {
+        margin-top: 8px;
+      }
+      .row.tight {
+        gap: 6px;
+      }
+
+      .toggle-row {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+      }
+      .toggle-row .label {
+        font-size: 13px;
+        font-weight: 500;
+      }
+
+      /* Switch */
+      .switch {
+        position: relative;
+        width: 36px;
+        height: 20px;
+        background: var(--border-strong);
+        border-radius: 999px;
+        cursor: pointer;
+        transition: background 0.15s ease;
+        flex-shrink: 0;
+      }
+      .switch::after {
+        content: '';
+        position: absolute;
+        top: 2px;
+        left: 2px;
+        width: 16px;
+        height: 16px;
+        background: #fff;
+        border-radius: 50%;
+        transition: left 0.15s ease;
+      }
+      .switch.on {
+        background: var(--accent);
+      }
+      .switch.on::after {
+        left: 18px;
+      }
+
+      /* Field shell */
+      .field {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        background: var(--surface);
+        border: 1px solid var(--border);
+        border-radius: var(--radius-sm);
+        padding: 4px 8px;
+        height: 32px;
+        flex: 1;
+        min-width: 0;
+      }
+      .field .icon {
+        width: 14px;
+        height: 14px;
+        flex-shrink: 0;
+        color: var(--text);
+        opacity: 0.85;
+      }
+      .field input,
+      .field select {
+        border: 0;
+        outline: 0;
+        background: transparent;
+        font-size: 12px;
+        color: var(--text);
+        font-family: inherit;
+        width: 100%;
+        min-width: 0;
+        padding: 0;
+      }
+      .field .swatch {
+        width: 16px;
+        height: 16px;
+        border-radius: 3px;
+        border: 1px solid var(--border-strong);
+        flex-shrink: 0;
+        cursor: pointer;
+        position: relative;
+        overflow: hidden;
+      }
+      .field .swatch input[type='color'] {
+        position: absolute;
+        inset: -4px;
+        opacity: 0;
+        cursor: pointer;
+        border: 0;
+        padding: 0;
+      }
+      .field .divider {
+        width: 1px;
+        height: 16px;
+        background: var(--border);
+        flex-shrink: 0;
+      }
+      /* Hex + opacity row: spinner + narrow width was clipping “100” → “10” */
+      .field.field-stroke-row input#stroke-color {
+        flex: 1 1 auto;
+        width: auto;
+        min-width: 2.75rem;
+        max-width: 100%;
+      }
+      .field.field-stroke-row input#opacity[type='number'] {
+        flex: 0 0 auto;
+        width: auto;
+        min-width: 3.25rem;
+        max-width: 4rem;
+        text-align: right;
+        -moz-appearance: textfield;
+      }
+      .field.field-stroke-row input#opacity::-webkit-outer-spin-button,
+      .field.field-stroke-row input#opacity::-webkit-inner-spin-button {
+        -webkit-appearance: none;
+        margin: 0;
+      }
+      .pct-suffix {
+        color: var(--text-muted);
+        flex-shrink: 0;
+        user-select: none;
+      }
+
+      /* Segmented buttons */
+      .segmented {
+        display: inline-flex;
+        gap: 2px;
+        background: var(--surface-2);
+        border-radius: var(--radius-sm);
+        padding: 2px;
+      }
+      .segmented button {
+        background: transparent;
+        border: 0;
+        width: 28px;
+        height: 28px;
+        border-radius: 4px;
+        cursor: pointer;
+        color: var(--text);
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        padding: 0;
+      }
+      .segmented button:hover {
+        background: rgba(0, 0, 0, 0.04);
+      }
+      .segmented button.active {
+        background: #fff;
+        color: var(--accent);
+        box-shadow: 0 0 0 1px var(--border);
+      }
+      .segmented button svg {
+        width: 16px;
+        height: 16px;
+      }
+
+      /* Arrow row — minmax keeps grid tracks from overflowing narrow plugin widths */
+      .row.arrow-row-gap {
+        margin-top: 14px;
+        flex-wrap: nowrap;
+        gap: var(--gap);
+        min-width: 0;
+        max-width: 100%;
+      }
+      .arrow-row {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+        gap: 10px;
+        align-items: center;
+        width: 100%;
+        max-width: 100%;
+        min-width: 0;
+      }
+      .arrow-row > * {
+        min-width: 0;
+      }
+      .row.arrow-row-gap > .arrow-row {
+        flex: 1 1 auto;
+        min-width: 0;
+      }
+      .arrow-field {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        background: var(--surface);
+        border: 1px solid var(--border);
+        border-radius: var(--radius-sm);
+        padding: 4px 8px;
+        min-height: 32px;
+        height: auto;
+        max-width: 100%;
+        box-sizing: border-box;
+        /* overflow must be visible so the dropdown panel can pop out */
+        overflow: visible;
+        position: relative;
+      }
+      .arrow-field .label {
+        color: var(--text-muted);
+        font-size: 11px;
+        flex-shrink: 0;
+      }
+      .arrow-field .preview {
+        flex: 1 1 auto;
+        display: flex;
+        align-items: center;
+        justify-content: flex-start;
+        min-width: 0;
+        min-height: 16px;
+        color: var(--text);
+        overflow: hidden; /* clip just the SVG preview, not the whole field */
+      }
+      .arrow-field .preview svg {
+        display: block;
+        height: 14px;
+        width: auto;
+        max-width: 100%;
+        flex-shrink: 1;
+      }
+      .arrow-picker {
+        /* static so panel is positioned relative to .arrow-field above */
+        position: static;
+        flex: 0 0 auto;
+      }
+      .arrow-picker-trigger {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        width: 28px;
+        height: 24px;
+        border: 0;
+        background: transparent;
+        cursor: pointer;
+        color: var(--text-muted);
+        border-radius: 4px;
+        padding: 0;
+      }
+      .arrow-picker-trigger:hover {
+        background: rgba(0, 0, 0, 0.06);
+        color: var(--text);
+      }
+      .arrow-picker-trigger .arrow-picker-chevron {
+        width: 14px;
+        height: 14px;
+      }
+      .arrow-picker-panel {
+        position: absolute;
+        /* align to the left edge of the parent .arrow-field */
+        left: -1px;
+        right: auto;
+        top: calc(100% + 4px);
+        transform: none;
+        z-index: 200;
+        display: none;
+        flex-direction: column;
+        gap: 4px;
+        /* at least as wide as the field; grows if options need more space */
+        min-width: calc(100% + 2px);
+        max-width: min(280px, calc(100vw - 24px));
+        background: var(--surface);
+        border: 1px solid var(--border-strong);
+        border-radius: var(--radius);
+        box-shadow:
+          0 4px 6px rgba(0, 0, 0, 0.06),
+          0 12px 24px rgba(0, 0, 0, 0.12);
+        padding: 6px;
+      }
+      /* [hidden] must not be overridden — author `display:flex` beats default [hidden] otherwise. */
+      .arrow-picker-panel:not([hidden]) {
+        display: flex;
+      }
+      .arrow-picker-option {
+        border: 0;
+        background: transparent;
+        cursor: pointer;
+        padding: 8px 10px;
+        border-radius: var(--radius-sm);
+        color: var(--text);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        width: 100%;
+      }
+      .arrow-picker-option svg {
+        display: block;
+        height: 16px;
+        width: 48px;
+        overflow: visible;
+      }
+      .arrow-picker-option:hover {
+        background: rgba(37, 99, 235, 0.08);
+      }
+      .arrow-picker-option.arrow-picker-option-selected {
+        background: rgba(37, 99, 235, 0.1);
+      }
+      .swap-btn {
+        flex-shrink: 0;
+        background: transparent;
+        border: 0;
+        cursor: pointer;
+        color: var(--accent);
+        width: 28px;
+        height: 28px;
+        border-radius: 4px;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+      }
+      .swap-btn:hover {
+        background: rgba(37, 99, 235, 0.08);
+      }
+
+      /* Anchor preview area */
+      .anchor-area {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 18px;
+        padding: 18px 14px;
+        background: var(--surface-2);
+        border-bottom: 1px solid var(--border);
+      }
+      .anchor-frame {
+        position: relative;
+        aspect-ratio: 1.4;
+        background: transparent;
+        border: 1.5px solid var(--border-strong);
+        border-radius: 8px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 11px;
+        color: var(--text-muted);
+        font-weight: 500;
+      }
+      .anchor-dot {
+        position: absolute;
+        width: 12px;
+        height: 12px;
+        border-radius: 50%;
+        background: #fff;
+        border: 1.5px solid var(--border-strong);
+        cursor: pointer;
+        transform: translate(-50%, -50%);
+      }
+      .anchor-dot:hover {
+        border-color: var(--accent);
+      }
+      .anchor-dot.active {
+        background: #fff;
+        border-color: var(--accent);
+        border-width: 2px;
+      }
+      /* Resolved (auto-routed) side gets a hollow ring instead of solid fill */
+      .anchor-dot.resolved {
+        background: #fff;
+        border-color: var(--accent);
+        border-width: 2px;
+      }
+      .anchor-dot.active::after,
+      .anchor-dot.resolved::after {
+        content: '';
+        position: absolute;
+        top: 50%;
+        left: 50%;
+        width: 4px;
+        height: 4px;
+        background: var(--accent);
+        border-radius: 50%;
+        transform: translate(-50%, -50%);
+      }
+      .frame-label {
+        position: absolute;
+        bottom: -18px;
+        left: 0;
+        right: 0;
+        text-align: center;
+        font-size: 10px;
+        color: var(--text-muted);
+        font-weight: 500;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+      .anchor-dot[data-side='top'] {
+        top: 0;
+        left: 50%;
+      }
+      .anchor-dot[data-side='right'] {
+        top: 50%;
+        left: 100%;
+      }
+      .anchor-dot[data-side='bottom'] {
+        top: 100%;
+        left: 50%;
+      }
+      .anchor-dot[data-side='left'] {
+        top: 50%;
+        left: 0;
+      }
+
+      /* Label section */
+      .label-input {
+        width: 100%;
+        height: 36px;
+        padding: 0 12px;
+        font-size: 13px;
+        font-family: inherit;
+        background: var(--surface);
+        border: 1px solid var(--border-strong);
+        border-radius: var(--radius-sm);
+        outline: 0;
+        color: var(--text);
+      }
+      .label-input:focus {
+        border-color: var(--accent);
+        box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.15);
+      }
+      .row.label-font-row {
+        flex-wrap: nowrap;
+        align-items: stretch;
+        gap: 6px;
+      }
+      .row.label-font-row > .field.field-font-family {
+        flex: 1 1 0;
+        min-width: 0;
+      }
+      .row.label-font-row > .field.field-font-size {
+        flex: 0 0 88px;
+        min-width: 88px;
+      }
+      .row.label-font-row > .field.field-font-size input {
+        text-align: right;
+      }
+      .row.label-attrs-row {
+        flex-wrap: nowrap;
+        align-items: stretch;
+        gap: 6px;
+      }
+      .row.label-attrs-row > .field {
+        flex: 1 1 0;
+        min-width: 0;
+      }
+
+      /* Endpoint info shown when editing existing flow */
+      .endpoint-info {
+        font-size: 10px;
+        color: var(--text-muted);
+        text-align: center;
+        margin-top: 6px;
+      }
+      .endpoint-info b {
+        color: var(--text);
+        font-weight: 500;
+      }
+
+      /* Disabled */
+      body.disabled .section:not(.toggle-section),
+      body.disabled .anchor-area {
+        opacity: 0.45;
+        pointer-events: none;
+      }
+
+      /* Presets */
+      .preset-section {
+        background: var(--surface);
+      }
+      .preset-header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 8px;
+        margin-bottom: 8px;
+      }
+      .preset-label {
+        font-size: 11px;
+        color: var(--text-muted);
+        font-weight: 500;
+        text-transform: uppercase;
+        letter-spacing: 0.04em;
+      }
+      .preset-current {
+        color: var(--accent);
+        font-size: 11px;
+        font-weight: 600;
+        min-width: 0;
+        text-align: right;
+      }
+      .preset-row {
+        display: grid;
+        grid-template-columns: repeat(3, 1fr);
+        gap: 6px;
+      }
+      .preset-btn {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        gap: 6px;
+        padding: 8px 4px;
+        background: var(--surface);
+        border: 1px solid var(--border-strong);
+        border-radius: var(--radius-sm);
+        cursor: pointer;
+        font-size: 12px;
+        color: var(--text);
+        font-family: inherit;
+        font-weight: 500;
+      }
+      .preset-btn:hover {
+        border-color: var(--accent);
+        background: rgba(37, 99, 235, 0.04);
+      }
+      .preset-btn:active {
+        background: rgba(37, 99, 235, 0.08);
+      }
+      .preset-btn.active {
+        border-color: var(--accent);
+        background: rgba(37, 99, 235, 0.08);
+        color: var(--accent);
+        box-shadow: inset 0 0 0 1px rgba(37, 99, 235, 0.22);
+      }
+      .preset-swatch {
+        width: 12px;
+        height: 12px;
+        border-radius: 3px;
+        flex-shrink: 0;
+        border: 1px solid rgba(0, 0, 0, 0.12);
+        background: #00eeff;
+      }
+      .help-section {
+        background: var(--surface-2);
+        color: var(--text-muted);
+        font-size: 11px;
+        line-height: 1.45;
+      }
+      .help-title {
+        color: var(--text);
+        font-weight: 600;
+        margin-bottom: 4px;
+      }
+    </style>
+  </head>
+
+  <body>
+    <!-- Toggle -->
+    <section class="section toggle-section">
+      <div class="toggle-header">
+        <div class="toggle-row">
+          <div class="switch on" id="active-toggle"></div>
+          <span class="label">On (Draw on section)</span>
+        </div>
+      </div>
+    </section>
+
+    <!-- Color & line type -->
+    <section class="section">
+      <div class="row">
+        <div class="field field-stroke-row" style="flex: 2;">
+          <span class="swatch" style="background: #00eeff;">
+            <input type="color" id="stroke-color-picker" value="#00eeff" />
+          </span>
+          <input type="text" id="stroke-color" value="00eeff" maxlength="6" inputmode="text" autocomplete="off" spellcheck="false" />
+          <span class="divider"></span>
+          <input type="number" id="opacity" value="100" min="0" max="100" />
+          <span class="pct-suffix">%</span>
+        </div>
+        <div class="segmented" id="line-type">
+          <button data-value="step" class="active" title="Step (orthogonal)">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2">
+              <path d="M4 18 H10 V6 H20" stroke-linecap="round" stroke-linejoin="round" />
+            </svg>
+          </button>
+          <button data-value="curved" title="Curved">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2">
+              <path d="M4 18 C 10 18, 14 6, 20 6" stroke-linecap="round" />
+            </svg>
+          </button>
+        </div>
+      </div>
+
+      <!-- Stroke + radius + dash -->
+      <div class="row tight">
+        <div class="field">
+          <svg class="icon" viewBox="0 0 24 24" fill="currentColor">
+            <rect x="3" y="6" width="18" height="2" /><rect x="3" y="11" width="18" height="3" /><rect x="3" y="17" width="18" height="4" />
+          </svg>
+          <input
+            type="number"
+            id="stroke-width"
+            value="4"
+            min="0"
+            max="40"
+            step="1"
+          />
+        </div>
+        <div class="field">
+          <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4">
+            <path d="M4 20 V12 A8 8 0 0 1 12 4 H20" stroke-linecap="round" />
+          </svg>
+          <input type="number" id="radius" value="20" min="0" max="200" step="1" />
+        </div>
+        <div class="field">
+          <svg class="icon" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.4">
+            <path d="M3 12 H7 M11 12 H15 M19 12 H21" stroke-linecap="round" />
+          </svg>
+          <input type="number" id="dash" value="0" min="0" max="40" step="1" title="Dash gap (0 = solid)" />
+        </div>
+      </div>
+
+      <!-- Arrow row -->
+      <div class="row arrow-row-gap">
+        <div class="arrow-row">
+          <div class="arrow-field">
+            <span class="label">Start</span>
+            <span class="preview" id="start-preview" aria-hidden="true"></span>
+            <div class="arrow-picker" id="picker-start">
+              <button
+                type="button"
+                class="arrow-picker-trigger"
+                id="start-arrow-trigger"
+                aria-expanded="false"
+                aria-haspopup="listbox"
+                aria-label="เลือกหัวลูกศรฝั่งเริ่ม"
+              >
+                <svg class="arrow-picker-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <path d="M6 9l6 6 6-6" stroke-linecap="round" stroke-linejoin="round" />
+                </svg>
+              </button>
+              <div class="arrow-picker-panel" id="start-arrow-panel" hidden role="listbox" aria-label="ประเภทหัวเส้นฝั่งเริ่ม"></div>
+            </div>
+          </div>
+          <button class="swap-btn" id="swap" title="สลับทิศ" type="button">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M7 7 H17 M14 4 L17 7 L14 10 M17 17 H7 M10 14 L7 17 L10 20" stroke-linecap="round" stroke-linejoin="round" />
+            </svg>
+          </button>
+          <div class="arrow-field">
+            <span class="label">End</span>
+            <span class="preview" id="end-preview" aria-hidden="true"></span>
+            <div class="arrow-picker" id="picker-end">
+              <button
+                type="button"
+                class="arrow-picker-trigger"
+                id="end-arrow-trigger"
+                aria-expanded="false"
+                aria-haspopup="listbox"
+                aria-label="เลือกหัวลูกศรฝั่งปลาย"
+              >
+                <svg class="arrow-picker-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <path d="M6 9l6 6 6-6" stroke-linecap="round" stroke-linejoin="round" />
+                </svg>
+              </button>
+              <div class="arrow-picker-panel" id="end-arrow-panel" hidden role="listbox" aria-label="ประเภทหัวเส้นฝั่งปลาย"></div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Anchor area -->
+    <div class="anchor-area">
+      <div class="anchor-frame" id="from-frame">
+        Start
+        <span class="anchor-dot" data-end="from" data-side="top"></span>
+        <span class="anchor-dot" data-end="from" data-side="right"></span>
+        <span class="anchor-dot" data-end="from" data-side="bottom"></span>
+        <span class="anchor-dot" data-end="from" data-side="left"></span>
+        <div class="frame-label" id="from-name"></div>
+      </div>
+      <div class="anchor-frame" id="to-frame">
+        End
+        <span class="anchor-dot" data-end="to" data-side="top"></span>
+        <span class="anchor-dot" data-end="to" data-side="right"></span>
+        <span class="anchor-dot" data-end="to" data-side="bottom"></span>
+        <span class="anchor-dot" data-end="to" data-side="left"></span>
+        <div class="frame-label" id="to-name"></div>
+      </div>
+    </div>
+    <div class="endpoint-info" id="endpoint-info" style="display: none;"></div>
+
+    <!-- Label section -->
+    <section class="section">
+      <div class="row">
+        <input
+          type="text"
+          class="label-input"
+          id="label-text"
+          placeholder="Label"
+        />
+      </div>
+      <div class="row label-font-row">
+        <div class="field field-font-family">
+          <svg class="icon" viewBox="0 0 24 24" fill="currentColor">
+            <text x="2" y="18" font-size="16" font-weight="700">Aa</text>
+          </svg>
+          <select id="font-family">
+            <option>Inter</option>
+            <option>Roboto</option>
+            <option>SF Pro Text</option>
+            <option>Helvetica</option>
+            <option>Arial</option>
+          </select>
+        </div>
+        <div class="field field-font-size">
+          <svg class="icon" viewBox="0 0 24 24" fill="currentColor">
+            <text x="2" y="18" font-size="14" font-weight="700">tT</text>
+          </svg>
+          <input
+            type="number"
+            id="font-size"
+            value="16"
+            min="4"
+            max="200"
+            step="1"
+          />
+        </div>
+      </div>
+
+      <div class="row label-attrs-row">
+        <div class="field">
+          <svg class="icon" viewBox="0 0 24 24" fill="currentColor">
+            <text x="4" y="18" font-size="16" font-weight="700">B</text>
+          </svg>
+          <select id="font-weight">
+            <option>Thin</option>
+            <option>Light</option>
+            <option selected>Regular</option>
+            <option>Medium</option>
+            <option>Semi Bold</option>
+            <option>Bold</option>
+            <option>Black</option>
+          </select>
+        </div>
+        <div class="field" title="Text color">
+          <svg class="icon" viewBox="0 0 24 24" fill="currentColor">
+            <path d="M2 20h20v3H2zM5.5 17l1.41-3.5h6.18L14.5 17h2.5L11.25 3h-2.5L3 17h2.5zm4.5-12.78L12.36 11H7.64L10 4.22z" />
+          </svg>
+          <input type="text" id="text-color" value="000000" maxlength="6" inputmode="text" autocomplete="off" spellcheck="false" />
+          <span class="swatch" style="background: #000;">
+            <input type="color" id="text-color-picker" value="#000000" />
+          </span>
+        </div>
+        <div class="field" title="Label background color">
+          <svg class="icon" viewBox="0 0 24 24" fill="currentColor">
+            <path d="M16.56 8.94 7.62 0 6.21 1.41l2.38 2.38-5.15 5.15a1.49 1.49 0 0 0 0 2.12l5.5 5.5a1.49 1.49 0 0 0 2.12 0l5.5-5.5a1.49 1.49 0 0 0 0-2.12zM5.21 10 10 5.21 14.79 10zm14.29.04s-2 2.17-2 3.5a2 2 0 0 0 4 0c0-1.33-2-3.5-2-3.5zM2 22h20v-3H2z" />
+          </svg>
+          <input type="text" id="label-bg-color" value="ffffff" maxlength="6" inputmode="text" autocomplete="off" spellcheck="false" />
+          <span class="swatch" style="background: #fff;">
+            <input type="color" id="label-bg-picker" value="#ffffff" />
+          </span>
+        </div>
+      </div>
+    </section>
+
+    <!-- Presets -->
+    <section class="section preset-section">
+      <div class="preset-header">
+        <div class="preset-label">Presets</div>
+        <div class="preset-current" id="preset-current">Using: Custom</div>
+      </div>
+      <div class="preset-row">
+        <button class="preset-btn" data-preset="custom" type="button">
+          <span class="preset-swatch" id="preset-swatch-custom"></span><span>Custom</span>
+        </button>
+        <button class="preset-btn" data-preset="success" type="button">
+          <span class="preset-swatch" id="preset-swatch-success" style="background:#22c55e"></span><span>Success</span>
+        </button>
+        <button class="preset-btn" data-preset="error" type="button">
+          <span class="preset-swatch" id="preset-swatch-error" style="background:#ef4444"></span><span>Error</span>
+        </button>
+      </div>
+    </section>
+
+    <section class="section help-section">
+      <div class="help-title">How to connect objects</div>
+      <div>Select an object → hold Shift → select another.</div>
+    </section>
+
+    <script>
+      // -----------------------------------------------------------------
+      // State
+      // -----------------------------------------------------------------
+      const DEFAULTS = {
+        strokeColor: '00eeff',
+        opacity: 100,
+        strokeWidth: 4,
+        strokeStyle: 'solid',
+        lineType: 'step',
+        radius: 20,
+        startArrow: 'none',
+        endArrow: 'arrow',
+        startAnchor: 'auto',
+        endAnchor: 'auto',
+        label: {
+          text: '',
+          fontFamily: 'Inter',
+          fontWeight: 'Regular',
+          fontSize: 16,
+          color: '000000',
+          background: 'ffffff',
+          backgroundEnabled: true,
+          borderEnabled: true,
+        },
+      };
+
+      let state = JSON.parse(JSON.stringify(DEFAULTS));
+      let active = true;
+      let mode = 'none';
+      let suppressEmit = false;
+      let resolvedStartSide = null;
+      let resolvedEndSide = null;
+      let fromName = '';
+      let toName = '';
+      let showDraftAnchors = false;
+
+      const DEFAULT_PRESETS = {
+        custom: JSON.parse(JSON.stringify(DEFAULTS)),
+        success: {
+          strokeColor: '22c55e',
+          opacity: 100,
+          strokeWidth: 4,
+          strokeStyle: 'solid',
+          lineType: 'step',
+          radius: 20,
+          startArrow: 'none',
+          endArrow: 'arrow',
+          startAnchor: 'auto',
+          endAnchor: 'auto',
+          label: Object.assign({}, DEFAULTS.label, { text: 'success', fontSize: 16 }),
+        },
+        error: {
+          strokeColor: 'ef4444',
+          opacity: 100,
+          strokeWidth: 4,
+          strokeStyle: 'solid',
+          lineType: 'step',
+          radius: 20,
+          startArrow: 'none',
+          endArrow: 'arrow',
+          startAnchor: 'auto',
+          endAnchor: 'auto',
+          label: Object.assign({}, DEFAULTS.label, { text: 'Error', fontSize: 16 }),
+        },
+      };
+      let savedPresetStyles = JSON.parse(JSON.stringify(DEFAULT_PRESETS));
+      let activePreset = 'custom';
+
+      function buildPresets() {
+        return savedPresetStyles;
+      }
+
+      function applyPreset(name) {
+        const presets = buildPresets();
+        const p = presets[name];
+        if (!p) return;
+        activePreset = name;
+        state = cloneStyle(p);
+        applyStateToUi();
+        updatePresetUi();
+        emit();
+      }
+
+      function updatePresetSwatches() {
+        ['custom', 'success', 'error'].forEach((name) => {
+          const sw = document.getElementById('preset-swatch-' + name);
+          const style = savedPresetStyles[name];
+          if (sw && style) sw.style.background = '#' + style.strokeColor;
+        });
+      }
+
+      function presetLabel(name) {
+        if (name === 'success') return 'Success';
+        if (name === 'error') return 'Error';
+        return 'Custom';
+      }
+
+      function updatePresetUi() {
+        document.querySelectorAll('.preset-btn').forEach((btn) => {
+          const isActive = btn.dataset.preset === activePreset;
+          btn.classList.toggle('active', isActive);
+          btn.setAttribute('aria-pressed', String(isActive));
+        });
+        const current = $('preset-current');
+        if (current) current.textContent = 'Using: ' + presetLabel(activePreset);
+      }
+
+      // -----------------------------------------------------------------
+      // Helpers
+      // -----------------------------------------------------------------
+      const $ = (id) => document.getElementById(id);
+      const cleanHex = (v) => (v || '').replace('#', '').toLowerCase().replace(/[^0-9a-f]/g, '').slice(0, 6).padEnd(6, '0');
+      const cloneStyle = (style) => JSON.parse(JSON.stringify(style));
+
+      function mergeStyle(base, patch) {
+        const next = Object.assign(cloneStyle(DEFAULTS), cloneStyle(base), cloneStyle(patch));
+        next.label = Object.assign({}, DEFAULTS.label, base.label || {}, patch.label || {});
+        if (patch.labelFontSize !== undefined) next.label.fontSize = patch.labelFontSize;
+        delete next.labelFontSize;
+        return next;
+      }
+
+      function normalizePresetStyle(name, style) {
+        if (name === 'custom') return mergeStyle(DEFAULT_PRESETS.custom, style || {});
+        const next = cloneStyle(DEFAULT_PRESETS[name]);
+        const savedText = style && style.label && typeof style.label.text === 'string'
+          ? style.label.text.trim()
+          : '';
+        if (savedText) {
+          next.label.text = savedText;
+        }
+        return next;
+      }
+
+      function normalizePresetStyles(styles) {
+        const next = {};
+        ['custom', 'success', 'error'].forEach((name) => {
+          next[name] = normalizePresetStyle(name, styles && styles[name]);
+        });
+        return next;
+      }
+
+      function savePresetStyle(name, style) {
+        savedPresetStyles[name] = normalizePresetStyle(name, style);
+        updatePresetSwatches();
+        updatePresetUi();
+        post({ type: 'save-preset-styles', styles: savedPresetStyles });
+      }
+
+      function saveActivePresetStyle() {
+        savePresetStyle(activePreset || 'custom', state);
+      }
+
+      function post(msg) {
+        parent.postMessage({ pluginMessage: msg }, '*');
+      }
+
+      /** Match Figma panel height to document (no empty gap under content). */
+      let __resizeRaf = null;
+      function scheduleResize() {
+        if (__resizeRaf != null) cancelAnimationFrame(__resizeRaf);
+        __resizeRaf = requestAnimationFrame(() => {
+          __resizeRaf = null;
+          const h = Math.ceil(
+            Math.max(
+              document.documentElement.getBoundingClientRect().height,
+              document.body.scrollHeight,
+            ),
+          );
+          post({ type: 'resize-ui', height: h });
+        });
+      }
+
+      // Coalesce rapid input events (keystrokes, slider drags, color picker)
+      // into one message per animation frame. Without this, dragging a slider
+      // can fire 30–60 'update-style' messages per second, each triggering a
+      // full setVectorNetworkAsync cycle in the sandbox.
+      let __emitRaf = null;
+      function emit(immediate) {
+        if (suppressEmit) return;
+        saveActivePresetStyle();
+        if (immediate) {
+          if (__emitRaf != null) { cancelAnimationFrame(__emitRaf); __emitRaf = null; }
+          post({ type: 'update-style', style: state });
+          return;
+        }
+        if (__emitRaf != null) return;
+        __emitRaf = requestAnimationFrame(() => {
+          __emitRaf = null;
+          post({ type: 'update-style', style: state });
+        });
+      }
+
+      function applyStateToUi() {
+        suppressEmit = true;
+        $('stroke-color').value = state.strokeColor;
+        $('stroke-color-picker').value = '#' + state.strokeColor;
+        document.querySelector('#stroke-color').parentElement.querySelector('.swatch').style.background = '#' + state.strokeColor;
+        $('opacity').value = state.opacity;
+        $('stroke-width').value = state.strokeWidth;
+        $('radius').value = state.radius;
+        $('dash').value = state.strokeStyle === 'dashed' ? Math.max(1, state.strokeWidth * 2) : 0;
+        document.querySelectorAll('#line-type button').forEach((b) => {
+          b.classList.toggle('active', b.dataset.value === state.lineType);
+        });
+        syncArrowPickerSelection('picker-start', state.startArrow);
+        syncArrowPickerSelection('picker-end', state.endArrow);
+        $('label-text').value = state.label.text;
+        $('font-family').value = state.label.fontFamily;
+        $('font-weight').value = state.label.fontWeight;
+        $('font-size').value = state.label.fontSize;
+        $('text-color').value = state.label.color;
+        $('text-color-picker').value = '#' + state.label.color;
+        document.querySelector('#text-color').parentElement.querySelector('.swatch').style.background = '#' + state.label.color;
+        $('label-bg-color').value = state.label.background;
+        $('label-bg-picker').value = '#' + state.label.background;
+        document.querySelector('#label-bg-color').parentElement.querySelector('.swatch').style.background = '#' + state.label.background;
+        renderAnchorDots();
+        renderArrowPreviews();
+        renderEndpointInfo();
+        $('active-toggle').classList.toggle('on', active);
+        document.body.classList.toggle('disabled', !active);
+        suppressEmit = false;
+        scheduleResize();
+      }
+
+      function renderAnchorDots() {
+        const showAnchorState = mode === 'one-flow' || showDraftAnchors;
+        document.querySelectorAll('.anchor-dot').forEach((dot) => {
+          const end = dot.dataset.end;
+          const side = dot.dataset.side;
+          const pinned = end === 'from' ? state.startAnchor : state.endAnchor;
+          const resolved = end === 'from' ? resolvedStartSide : resolvedEndSide;
+          const isPinned = showAnchorState && pinned !== 'auto' && pinned === side;
+          const isResolved = showAnchorState && mode === 'one-flow' && !isPinned && pinned === 'auto' && resolved === side;
+          dot.classList.toggle('active', isPinned);
+          dot.classList.toggle('resolved', isResolved);
+        });
+      }
+
+      function renderEndpointInfo() {
+        const info = $('endpoint-info');
+        $('from-name').textContent = fromName || '';
+        $('to-name').textContent = toName || '';
+        if (mode === 'one-flow' && (fromName || toName)) {
+          info.style.display = 'block';
+          const s = resolvedStartSide || state.startAnchor;
+          const e = resolvedEndSide || state.endAnchor;
+          info.innerHTML = `<b>${escapeHtml(fromName)}</b> · ${s} → ${e} · <b>${escapeHtml(toName)}</b>`;
+        } else {
+          info.style.display = 'none';
+        }
+      }
+
+      function escapeHtml(s) {
+        return (s || '').replace(/[&<>"']/g, (c) =>
+          ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]),
+        );
+      }
+
+      function arrowSvg(type, reversed) {
+        const t = type;
+        const flip = reversed ? 'transform="translate(48,0) scale(-1,1)"' : '';
+        if (t === 'none') {
+          return `<svg width="48" height="14" viewBox="0 0 48 14" xmlns="http://www.w3.org/2000/svg"><line x1="10" y1="7" x2="38" y2="7" stroke="currentColor" stroke-width="1.6"/></svg>`;
+        }
+        let head = '';
+        if (t === 'arrow') head = `<path d="M34 7 L28 3 L28 11 Z" fill="currentColor"/>`;
+        if (t === 'circle') head = `<circle cx="32" cy="7" r="4" fill="currentColor"/>`;
+        if (t === 'diamond') head = `<path d="M32 3 L36 7 L32 11 L28 7 Z" fill="currentColor"/>`;
+        if (t === 'square') head = `<rect x="28" y="3" width="8" height="8" fill="currentColor"/>`;
+        return `<svg width="48" height="14" viewBox="0 0 48 14" xmlns="http://www.w3.org/2000/svg"><g ${flip}><line x1="10" y1="7" x2="28" y2="7" stroke="currentColor" stroke-width="1.6"/>${head}</g></svg>`;
+      }
+
+      function renderArrowPreviews() {
+        $('start-preview').innerHTML = arrowSvg(state.startArrow, true);
+        $('end-preview').innerHTML = arrowSvg(state.endArrow, false);
+      }
+
+      const ARROW_CAP_VALUES = ['none', 'arrow', 'circle', 'diamond', 'square'];
+
+      function closeArrowPickers() {
+        document.querySelectorAll('.arrow-picker-panel').forEach((panel) => {
+          panel.hidden = true;
+          const tr = panel.closest('.arrow-picker').querySelector('.arrow-picker-trigger');
+          if (tr) tr.setAttribute('aria-expanded', 'false');
+        });
+      }
+
+      function syncArrowPickerSelection(rootId, value) {
+        const root = $(rootId);
+        if (!root) return;
+        root.querySelectorAll('.arrow-picker-option').forEach((btn) => {
+          const sel = btn.dataset.value === value;
+          btn.setAttribute('aria-selected', String(sel));
+          btn.classList.toggle('arrow-picker-option-selected', sel);
+        });
+      }
+
+      function initArrowPickers() {
+        function wire(rootId, stateKey, reversed) {
+          const root = $(rootId);
+          const panel = root.querySelector('.arrow-picker-panel');
+          const trigger = root.querySelector('.arrow-picker-trigger');
+          ARROW_CAP_VALUES.forEach((val) => {
+            const btn = document.createElement('button');
+            btn.type = 'button';
+            btn.className = 'arrow-picker-option';
+            btn.dataset.value = val;
+            btn.setAttribute('role', 'option');
+            btn.innerHTML = arrowSvg(val, reversed);
+            btn.addEventListener('click', (ev) => {
+              ev.stopPropagation();
+              state[stateKey] = val;
+              syncArrowPickerSelection(rootId, val);
+              renderArrowPreviews();
+              emit();
+              closeArrowPickers();
+            });
+            panel.appendChild(btn);
+          });
+          trigger.addEventListener('click', (ev) => {
+            ev.stopPropagation();
+            const willOpen = panel.hidden;
+            closeArrowPickers();
+            if (willOpen) {
+              syncArrowPickerSelection(rootId, state[stateKey]);
+              panel.hidden = false;
+              trigger.setAttribute('aria-expanded', 'true');
+            }
+          });
+        }
+        wire('picker-start', 'startArrow', true);
+        wire('picker-end', 'endArrow', false);
+        document.addEventListener(
+          'pointerdown',
+          (e) => {
+            const el = e.target;
+            if (el && typeof el.closest === 'function' && el.closest('.arrow-picker')) return;
+            closeArrowPickers();
+          },
+          true,
+        );
+        document.addEventListener('keydown', (e) => {
+          if (e.key === 'Escape') closeArrowPickers();
+        });
+      }
+
+      // -----------------------------------------------------------------
+      // Wire up controls
+      // -----------------------------------------------------------------
+
+      $('active-toggle').onclick = () => {
+        active = !active;
+        $('active-toggle').classList.toggle('on', active);
+        document.body.classList.toggle('disabled', !active);
+        post({ type: 'set-active', active });
+        scheduleResize();
+      };
+
+      function bindNumber(id, key) {
+        $(id).addEventListener('input', (e) => {
+          const v = parseFloat(e.target.value);
+          if (Number.isFinite(v)) {
+            state[key] = v;
+            emit();
+          }
+        });
+      }
+      bindNumber('opacity', 'opacity');
+      bindNumber('stroke-width', 'strokeWidth');
+      bindNumber('radius', 'radius');
+
+      $('dash').addEventListener('input', (e) => {
+        const v = parseFloat(e.target.value);
+        state.strokeStyle = v > 0 ? 'dashed' : 'solid';
+        emit();
+      });
+
+      function bindHex(textId, pickerId, key, sub) {
+        const setVal = (hex) => {
+          if (sub) state[sub][key] = hex;
+          else state[key] = hex;
+          $(textId).value = hex;
+          $(pickerId).value = '#' + hex;
+          $(textId).parentElement.querySelector('.swatch').style.background = '#' + hex;
+          emit();
+        };
+        $(textId).addEventListener('input', (e) => setVal(cleanHex(e.target.value)));
+        $(pickerId).addEventListener('input', (e) => setVal(cleanHex(e.target.value)));
+      }
+      bindHex('stroke-color', 'stroke-color-picker', 'strokeColor');
+      document.querySelectorAll('.preset-btn').forEach((btn) => {
+        btn.addEventListener('click', () => applyPreset(btn.dataset.preset));
+      });
+      bindHex('text-color', 'text-color-picker', 'color', 'label');
+      bindHex('label-bg-color', 'label-bg-picker', 'background', 'label');
+
+      document.querySelectorAll('#line-type button').forEach((btn) => {
+        btn.addEventListener('click', () => {
+          state.lineType = btn.dataset.value;
+          document.querySelectorAll('#line-type button').forEach((b) =>
+            b.classList.toggle('active', b === btn),
+          );
+          emit();
+        });
+      });
+
+      $('swap').addEventListener('click', () => {
+        const tmpA = state.startArrow;
+        state.startArrow = state.endArrow;
+        state.endArrow = tmpA;
+        syncArrowPickerSelection('picker-start', state.startArrow);
+        syncArrowPickerSelection('picker-end', state.endArrow);
+        const tmpAnchor = state.startAnchor;
+        state.startAnchor = state.endAnchor;
+        state.endAnchor = tmpAnchor;
+        renderArrowPreviews();
+        renderAnchorDots();
+        if (mode === 'one-flow' || mode === 'multi-flow') {
+          post({ type: 'swap-direction' });
+        } else {
+          emit();
+        }
+      });
+
+      document.querySelectorAll('.anchor-dot').forEach((dot) => {
+        dot.addEventListener('click', () => {
+          const end = dot.dataset.end;
+          const side = dot.dataset.side;
+          if (end === 'from') {
+            state.startAnchor = state.startAnchor === side ? 'auto' : side;
+          } else {
+            state.endAnchor = state.endAnchor === side ? 'auto' : side;
+          }
+          showDraftAnchors = true;
+          renderAnchorDots();
+          emit();
+        });
+      });
+
+      $('label-text').addEventListener('input', (e) => {
+        state.label.text = e.target.value;
+        emit();
+      });
+      $('font-family').addEventListener('change', (e) => {
+        state.label.fontFamily = e.target.value;
+        emit();
+      });
+      $('font-weight').addEventListener('change', (e) => {
+        state.label.fontWeight = e.target.value;
+        emit();
+      });
+      $('font-size').addEventListener('input', (e) => {
+        const v = parseFloat(e.target.value);
+        if (Number.isFinite(v)) {
+          state.label.fontSize = v;
+          emit();
+        }
+      });
+
+      // -----------------------------------------------------------------
+      // Sandbox messages
+      // -----------------------------------------------------------------
+      window.addEventListener('message', (event) => {
+        const msg = event.data.pluginMessage;
+        if (!msg) return;
+        if (msg.type === 'selection') {
+          mode = msg.mode;
+          showDraftAnchors = false;
+          active = msg.active;
+          resolvedStartSide = msg.resolvedStartSide || null;
+          resolvedEndSide = msg.resolvedEndSide || null;
+          fromName = msg.fromName || '';
+          toName = msg.toName || '';
+          if (msg.style) {
+            // Backfill any missing fields from defaults so old flows still work.
+            state = Object.assign(JSON.parse(JSON.stringify(DEFAULTS)), msg.style);
+            state.label = Object.assign({}, DEFAULTS.label, msg.style.label || {});
+          }
+          applyStateToUi();
+          updatePresetUi();
+          scheduleResize();
+        } else if (msg.type === 'preset-styles') {
+          savedPresetStyles = normalizePresetStyles(msg.styles || {});
+          if (mode !== 'one-flow' && mode !== 'multi-flow') {
+            state = cloneStyle(savedPresetStyles.custom);
+            applyStateToUi();
+          }
+          updatePresetSwatches();
+          updatePresetUi();
+        }
+      });
+
+      // -----------------------------------------------------------------
+      // Init
+      // -----------------------------------------------------------------
+      initArrowPickers();
+      updatePresetSwatches();
+      updatePresetUi();
+      applyStateToUi();
+      try {
+        new ResizeObserver(() => scheduleResize()).observe(document.documentElement);
+      } catch (_) {}
+      post({ type: 'ui-ready' });
+      scheduleResize();
+    </script>
+  </body>
+</html>

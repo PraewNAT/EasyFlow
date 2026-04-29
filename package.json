@@ -1,0 +1,15 @@
+{
+  "name": "easyflow",
+  "version": "0.1.0",
+  "description": "EasyFlow - quickly draw and style flow diagrams between Figma frames.",
+  "scripts": {
+    "build": "node build.js",
+    "watch": "node build.js --watch",
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "@figma/plugin-typings": "^1.100.2",
+    "esbuild": "^0.21.5",
+    "typescript": "^5.4.5"
+  }
+}
