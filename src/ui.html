@@ -160,7 +160,7 @@
         background: var(--border);
         flex-shrink: 0;
       }
-      /* Hex + opacity row: spinner + narrow width was clipping “100” → “10” */
+      /* Hex + opacity row: spinner + narrow width was clipping "100" → "10" */
       .field.field-stroke-row input#stroke-color {
         flex: 1 1 auto;
         width: auto;
@@ -551,16 +551,22 @@
         text-align: right;
       }
       .preset-row {
-        display: grid;
-        grid-template-columns: repeat(3, 1fr);
+        display: flex;
+        flex-wrap: wrap;
         gap: 6px;
+        align-items: center;
+      }
+      /* Wrapper for user presets (has delete button) */
+      .preset-btn-wrap {
+        position: relative;
+        display: inline-flex;
       }
       .preset-btn {
         display: inline-flex;
         align-items: center;
         justify-content: center;
         gap: 6px;
-        padding: 8px 4px;
+        padding: 6px 10px;
         background: var(--surface);
         border: 1px solid var(--border-strong);
         border-radius: var(--radius-sm);
@@ -569,6 +575,7 @@
         color: var(--text);
         font-family: inherit;
         font-weight: 500;
+        white-space: nowrap;
       }
       .preset-btn:hover {
         border-color: var(--accent);
@@ -584,12 +591,97 @@
         box-shadow: inset 0 0 0 1px rgba(37, 99, 235, 0.22);
       }
       .preset-swatch {
-        width: 12px;
-        height: 12px;
+        width: 10px;
+        height: 10px;
         border-radius: 3px;
         flex-shrink: 0;
         border: 1px solid rgba(0, 0, 0, 0.12);
-        background: #00eeff;
+      }
+      /* Delete button — shown on hover over the wrap */
+      .preset-delete-btn {
+        position: absolute;
+        top: -5px;
+        right: -5px;
+        width: 14px;
+        height: 14px;
+        background: var(--danger);
+        color: #fff;
+        border: none;
+        border-radius: 50%;
+        font-size: 11px;
+        line-height: 1;
+        cursor: pointer;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        padding: 0;
+        opacity: 0;
+        transition: opacity 0.12s;
+        z-index: 10;
+      }
+      .preset-btn-wrap:hover .preset-delete-btn {
+        opacity: 1;
+      }
+      /* Add preset button */
+      .preset-add-btn {
+        display: inline-flex;
+        align-items: center;
+        gap: 4px;
+        padding: 6px 10px;
+        background: transparent;
+        border: 1px dashed var(--border-strong);
+        border-radius: var(--radius-sm);
+        cursor: pointer;
+        font-size: 11px;
+        color: var(--text-muted);
+        font-family: inherit;
+        white-space: nowrap;
+      }
+      .preset-add-btn:hover {
+        border-color: var(--accent);
+        color: var(--accent);
+        background: rgba(37, 99, 235, 0.04);
+      }
+      /* Inline name form */
+      .preset-name-form {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        margin-top: 8px;
+      }
+      .preset-name-input-field {
+        flex: 1;
+        height: 30px;
+        padding: 0 8px;
+        font-size: 12px;
+        font-family: inherit;
+        background: var(--surface);
+        border: 1px solid var(--accent);
+        border-radius: var(--radius-sm);
+        outline: 0;
+        color: var(--text);
+        box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.15);
+      }
+      .preset-name-btn {
+        width: 28px;
+        height: 28px;
+        border-radius: var(--radius-sm);
+        border: 1px solid var(--border-strong);
+        background: var(--surface);
+        cursor: pointer;
+        font-size: 13px;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        padding: 0;
+        flex-shrink: 0;
+      }
+      .preset-name-btn.confirm {
+        color: var(--accent);
+        border-color: var(--accent);
+      }
+      .preset-name-btn.cancel {
+        color: var(--text-muted);
       }
       .help-section {
         background: var(--surface-2);
@@ -820,18 +912,15 @@
     <section class="section preset-section">
       <div class="preset-header">
         <div class="preset-label">Presets</div>
-        <div class="preset-current" id="preset-current">Using: Custom</div>
+        <div class="preset-current" id="preset-current">Using: Default</div>
       </div>
-      <div class="preset-row">
-        <button class="preset-btn" data-preset="custom" type="button">
-          <span class="preset-swatch" id="preset-swatch-custom"></span><span>Custom</span>
-        </button>
-        <button class="preset-btn" data-preset="success" type="button">
-          <span class="preset-swatch" id="preset-swatch-success" style="background:#22c55e"></span><span>Success</span>
-        </button>
-        <button class="preset-btn" data-preset="error" type="button">
-          <span class="preset-swatch" id="preset-swatch-error" style="background:#ef4444"></span><span>Error</span>
-        </button>
+      <!-- Dynamically populated by renderPresets() -->
+      <div class="preset-row" id="preset-row"></div>
+      <!-- Inline name form (shown when adding a preset) -->
+      <div class="preset-name-form" id="preset-name-form" style="display:none;">
+        <input type="text" id="preset-name-input" class="preset-name-input-field" placeholder="Preset name" maxlength="30" />
+        <button type="button" id="preset-name-confirm" class="preset-name-btn confirm" title="Confirm">✓</button>
+        <button type="button" id="preset-name-cancel" class="preset-name-btn cancel" title="Cancel">✕</button>
       </div>
     </section>
 
@@ -877,8 +966,10 @@
       let toName = '';
       let showDraftAnchors = false;
 
+      const BUILT_IN_PRESETS = ['default'];
+
       const DEFAULT_PRESETS = {
-        custom: JSON.parse(JSON.stringify(DEFAULTS)),
+        default: JSON.parse(JSON.stringify(DEFAULTS)),
         success: {
           strokeColor: '22c55e',
           opacity: 100,
@@ -890,7 +981,7 @@
           endArrow: 'arrow',
           startAnchor: 'auto',
           endAnchor: 'auto',
-          label: Object.assign({}, DEFAULTS.label, { text: 'success', fontSize: 16 }),
+          label: Object.assign({}, DEFAULTS.label, { text: 'Success', fontSize: 16 }),
         },
         error: {
           strokeColor: 'ef4444',
@@ -906,47 +997,9 @@
           label: Object.assign({}, DEFAULTS.label, { text: 'Error', fontSize: 16 }),
         },
       };
+
       let savedPresetStyles = JSON.parse(JSON.stringify(DEFAULT_PRESETS));
-      let activePreset = 'custom';
-
-      function buildPresets() {
-        return savedPresetStyles;
-      }
-
-      function applyPreset(name) {
-        const presets = buildPresets();
-        const p = presets[name];
-        if (!p) return;
-        activePreset = name;
-        state = cloneStyle(p);
-        applyStateToUi();
-        updatePresetUi();
-        emit();
-      }
-
-      function updatePresetSwatches() {
-        ['custom', 'success', 'error'].forEach((name) => {
-          const sw = document.getElementById('preset-swatch-' + name);
-          const style = savedPresetStyles[name];
-          if (sw && style) sw.style.background = '#' + style.strokeColor;
-        });
-      }
-
-      function presetLabel(name) {
-        if (name === 'success') return 'Success';
-        if (name === 'error') return 'Error';
-        return 'Custom';
-      }
-
-      function updatePresetUi() {
-        document.querySelectorAll('.preset-btn').forEach((btn) => {
-          const isActive = btn.dataset.preset === activePreset;
-          btn.classList.toggle('active', isActive);
-          btn.setAttribute('aria-pressed', String(isActive));
-        });
-        const current = $('preset-current');
-        if (current) current.textContent = 'Using: ' + presetLabel(activePreset);
-      }
+      let activePreset = 'default';
 
       // -----------------------------------------------------------------
       // Helpers
@@ -963,35 +1016,194 @@
         return next;
       }
 
+      function presetLabel(name) {
+        const labels = { default: 'Default', success: 'Success', error: 'Error' };
+        if (labels[name]) return labels[name];
+        return name;
+      }
+
+      // -----------------------------------------------------------------
+      // Preset normalization (handles legacy 'custom' → 'default' migration)
+      // -----------------------------------------------------------------
+
       function normalizePresetStyle(name, style) {
-        if (name === 'custom') return mergeStyle(DEFAULT_PRESETS.custom, style || {});
-        const next = cloneStyle(DEFAULT_PRESETS[name]);
-        const savedText = style && style.label && typeof style.label.text === 'string'
-          ? style.label.text.trim()
-          : '';
-        if (savedText) {
-          next.label.text = savedText;
-        }
-        return next;
+        const base = DEFAULT_PRESETS[name] || DEFAULTS;
+        if (!style) return cloneStyle(base);
+        return mergeStyle(base, style);
       }
 
       function normalizePresetStyles(styles) {
+        const src = Object.assign({}, styles);
+        // Migrate legacy 'custom' key to 'default'
+        if (src.custom && !src.default) {
+          src.default = src.custom;
+        }
+        delete src.custom;
+
         const next = {};
-        ['custom', 'success', 'error'].forEach((name) => {
-          next[name] = normalizePresetStyle(name, styles && styles[name]);
+        // Built-ins first (always present)
+        BUILT_IN_PRESETS.forEach((name) => {
+          next[name] = normalizePresetStyle(name, src[name]);
         });
+        // User presets
+        Object.keys(src)
+          .filter((n) => !BUILT_IN_PRESETS.includes(n))
+          .forEach((name) => {
+            next[name] = normalizePresetStyle(name, src[name]);
+          });
         return next;
       }
 
-      function savePresetStyle(name, style) {
-        savedPresetStyles[name] = normalizePresetStyle(name, style);
-        updatePresetSwatches();
+      // -----------------------------------------------------------------
+      // Preset rendering
+      // -----------------------------------------------------------------
+
+      function renderPresets() {
+        const row = $('preset-row');
+        if (!row) return;
+        row.innerHTML = '';
+
+        const allNames = [
+          ...BUILT_IN_PRESETS.filter((n) => savedPresetStyles[n]),
+          ...Object.keys(savedPresetStyles).filter((n) => !BUILT_IN_PRESETS.includes(n)),
+        ];
+
+        allNames.forEach((name) => {
+          const style = savedPresetStyles[name];
+          const isBuiltIn = BUILT_IN_PRESETS.includes(name);
+
+          const wrap = document.createElement('div');
+          wrap.className = 'preset-btn-wrap';
+
+          const btn = document.createElement('button');
+          btn.type = 'button';
+          btn.className = 'preset-btn';
+          btn.dataset.preset = name;
+          btn.setAttribute('aria-pressed', 'false');
+
+          const swatch = document.createElement('span');
+          swatch.className = 'preset-swatch';
+          swatch.style.background = '#' + (style ? style.strokeColor : '00eeff');
+
+          const lbl = document.createElement('span');
+          lbl.textContent = presetLabel(name);
+
+          btn.appendChild(swatch);
+          btn.appendChild(lbl);
+          btn.addEventListener('click', () => applyPreset(name));
+          wrap.appendChild(btn);
+
+          if (!isBuiltIn) {
+            const delBtn = document.createElement('button');
+            delBtn.type = 'button';
+            delBtn.className = 'preset-delete-btn';
+            delBtn.title = 'Delete "' + name + '"';
+            delBtn.textContent = '×';
+            delBtn.addEventListener('click', (e) => {
+              e.stopPropagation();
+              deletePreset(name);
+            });
+            wrap.appendChild(delBtn);
+          }
+
+          row.appendChild(wrap);
+        });
+
+        // "+ Add" button
+        const addBtn = document.createElement('button');
+        addBtn.type = 'button';
+        addBtn.className = 'preset-add-btn';
+        addBtn.id = 'preset-add-btn-dynamic';
+        addBtn.textContent = '+ Add';
+        addBtn.addEventListener('click', showAddPresetInput);
+        row.appendChild(addBtn);
+
         updatePresetUi();
+        scheduleResize();
+      }
+
+      function updatePresetUi() {
+        document.querySelectorAll('.preset-btn').forEach((btn) => {
+          const isActive = btn.dataset.preset === activePreset;
+          btn.classList.toggle('active', isActive);
+          btn.setAttribute('aria-pressed', String(isActive));
+        });
+        const current = $('preset-current');
+        if (current) current.textContent = 'Using: ' + presetLabel(activePreset);
+      }
+
+      function updatePresetSwatch(name) {
+        const style = savedPresetStyles[name];
+        if (!style) return;
+        document.querySelectorAll('.preset-btn[data-preset="' + name + '"] .preset-swatch').forEach((sw) => {
+          sw.style.background = '#' + style.strokeColor;
+        });
+      }
+
+      // -----------------------------------------------------------------
+      // Preset actions
+      // -----------------------------------------------------------------
+
+      function applyPreset(name) {
+        const p = savedPresetStyles[name];
+        if (!p) return;
+        activePreset = name;
+        state = cloneStyle(p);
+        applyStateToUi();
+        updatePresetUi();
+        emit();
+      }
+
+      function deletePreset(name) {
+        if (BUILT_IN_PRESETS.includes(name)) return;
+        delete savedPresetStyles[name];
+        if (activePreset === name) {
+          activePreset = 'default';
+          state = cloneStyle(savedPresetStyles['default'] || DEFAULTS);
+          applyStateToUi();
+        }
+        renderPresets();
+        post({ type: 'save-preset-styles', styles: savedPresetStyles });
+      }
+
+      function showAddPresetInput() {
+        const form = $('preset-name-form');
+        if (!form) return;
+        form.style.display = 'flex';
+        const input = $('preset-name-input');
+        let n = 1;
+        while (savedPresetStyles['Preset ' + n]) n++;
+        input.value = 'Preset ' + n;
+        input.focus();
+        input.select();
+        scheduleResize();
+      }
+
+      function hideAddPresetInput() {
+        const form = $('preset-name-form');
+        if (form) form.style.display = 'none';
+        scheduleResize();
+      }
+
+      function confirmAddPreset() {
+        const input = $('preset-name-input');
+        const name = (input ? input.value : '').trim();
+        if (!name) { hideAddPresetInput(); return; }
+        savedPresetStyles[name] = cloneStyle(state);
+        activePreset = name;
+        hideAddPresetInput();
+        renderPresets();
+        post({ type: 'save-preset-styles', styles: savedPresetStyles });
+      }
+
+      function savePresetStyle(name, style) {
+        savedPresetStyles[name] = cloneStyle(style);
+        updatePresetSwatch(name);
         post({ type: 'save-preset-styles', styles: savedPresetStyles });
       }
 
       function saveActivePresetStyle() {
-        savePresetStyle(activePreset || 'custom', state);
+        savePresetStyle(activePreset || 'default', state);
       }
 
       function post(msg) {
@@ -1233,9 +1445,6 @@
         $(pickerId).addEventListener('input', (e) => setVal(cleanHex(e.target.value)));
       }
       bindHex('stroke-color', 'stroke-color-picker', 'strokeColor');
-      document.querySelectorAll('.preset-btn').forEach((btn) => {
-        btn.addEventListener('click', () => applyPreset(btn.dataset.preset));
-      });
       bindHex('text-color', 'text-color-picker', 'color', 'label');
       bindHex('label-bg-color', 'label-bg-picker', 'background', 'label');
 
@@ -1302,6 +1511,14 @@
         }
       });
 
+      // Preset name form
+      $('preset-name-confirm').addEventListener('click', confirmAddPreset);
+      $('preset-name-cancel').addEventListener('click', hideAddPresetInput);
+      $('preset-name-input').addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') confirmAddPreset();
+        if (e.key === 'Escape') hideAddPresetInput();
+      });
+
       // -----------------------------------------------------------------
       // Sandbox messages
       // -----------------------------------------------------------------
@@ -1327,11 +1544,10 @@
         } else if (msg.type === 'preset-styles') {
           savedPresetStyles = normalizePresetStyles(msg.styles || {});
           if (mode !== 'one-flow' && mode !== 'multi-flow') {
-            state = cloneStyle(savedPresetStyles.custom);
+            state = cloneStyle(savedPresetStyles['default'] || savedPresetStyles.default || DEFAULTS);
             applyStateToUi();
           }
-          updatePresetSwatches();
-          updatePresetUi();
+          renderPresets();
         }
       });
 
@@ -1339,8 +1555,7 @@
       // Init
       // -----------------------------------------------------------------
       initArrowPickers();
-      updatePresetSwatches();
-      updatePresetUi();
+      renderPresets();
       applyStateToUi();
       try {
         new ResizeObserver(() => scheduleResize()).observe(document.documentElement);

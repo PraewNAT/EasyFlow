@@ -37,8 +37,7 @@ export interface FlowMeta extends FlowStyle {
   labelNodeId?: string;
 }
 
-export type PresetName = 'custom' | 'success' | 'error';
-export type PresetStyles = Partial<Record<PresetName, FlowStyle>>;
+export type PresetStyles = Record<string, FlowStyle>;
 
 export const DEFAULT_STYLE: FlowStyle = {
   strokeColor: '00eeff',
