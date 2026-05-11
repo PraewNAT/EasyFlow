@@ -70,3 +70,4 @@ key `easyflow.meta` เก็บ JSON ของ `FlowMeta` (`fromNodeId`, `toNod
 - 1 → many connections
 - Export flow map
 - Animation preview
+# EasyFlow
