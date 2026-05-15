@@ -48,6 +48,18 @@ let lastStyle: FlowStyle = clone(DEFAULT_STYLE);
 // Track the previous selection so we can determine direction (start → end).
 let lastSelectionIds: string[] = figma.currentPage.selection.map((n) => n.id);
 
+// Reverse indices — declared up here (before the bootstrap call below
+// uses them) because esbuild's IIFE bundle would otherwise hit them
+// while still in their temporal dead zone and throw
+// "cannot read property 'clear' of undefined".
+//   endpointToFlows: endpoint node id → set of flow ids that use it
+//   flowToEndpoints: flow id → its two endpoint ids (O(1) delete unindex)
+//   flowToLabel / labelToFlow: bidirectional flow ↔ label-node link
+const endpointToFlows = new Map<string, Set<string>>();
+const flowToEndpoints = new Map<string, [string, string]>();
+const flowToLabel = new Map<string, string>();
+const labelToFlow = new Map<string, string>();
+
 // Register selection / page handlers synchronously — both work in
 // dynamic-page mode without loadAllPagesAsync.
 figma.on('selectionchange', () => { void onSelectionChangedAsync(); });
@@ -545,9 +557,6 @@ async function removeFlowLabel(meta: FlowMeta, flowId?: string): Promise<void> {
   if (flowId) flowToLabel.delete(flowId);
 }
 
-const flowToLabel = new Map<string, string>();
-const labelToFlow = new Map<string, string>();
-
 async function removeLabelsOwnedBy(flowId: string): Promise<void> {
   const labelId = flowToLabel.get(flowId);
   if (!labelId) return;
@@ -832,12 +841,6 @@ function scheduleFlowRerenderForMovedEndpoints(): void {
     void rerenderFlowsForEndpointIds(ids);
   }, 12);
 }
-
-// Reverse indices to avoid full-page scans on every event:
-//   endpoint node id → set of flow ids that use it (for drag rerender)
-//   flow id → its two endpoint ids (for O(1) delete unindex)
-const endpointToFlows = new Map<string, Set<string>>();
-const flowToEndpoints = new Map<string, [string, string]>();
 
 function indexFlowEndpoints(flowId: string, fromId: string, toId: string): void {
   flowToEndpoints.set(flowId, [fromId, toId]);
