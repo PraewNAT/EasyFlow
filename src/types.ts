@@ -43,8 +43,7 @@ export interface FlowMeta extends FlowStyle {
 
 export const DEFAULT_PATH_OFFSET = 0.5;
 
-export type PresetName = 'custom' | 'success' | 'error';
-export type PresetStyles = Partial<Record<PresetName, FlowStyle>>;
+export type PresetStyles = Record<string, FlowStyle>;
 
 export const DEFAULT_STYLE: FlowStyle = {
   strokeColor: '00eeff',

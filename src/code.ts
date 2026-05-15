@@ -30,6 +30,7 @@ import {
   type PresetStyles,
   type PluginToUi,
   type UiToPlugin,
+  // PresetName removed — presets now use arbitrary string keys
 } from './types';
 
 /** Plugin data on label/frame nodes so clicks promote to the flow vector. */
@@ -65,8 +66,14 @@ maybeEnableDocChangeForCurrentPage();
 const SAVED_PRESET_STYLES_KEY = 'easyflow.presetStyles';
 void figma.clientStorage.getAsync(SAVED_PRESET_STYLES_KEY).then((styles) => {
   if (styles && typeof styles === 'object') {
-    const presetStyles = normalizePresetStyles(styles as PresetStyles);
-    if (presetStyles.custom) lastStyle = presetStyles.custom;
+    const raw = styles as Record<string, unknown>;
+    // Migrate legacy 'custom' key → 'default'
+    if (raw['custom'] && !raw['default']) {
+      raw['default'] = raw['custom'];
+      delete raw['custom'];
+    }
+    const presetStyles = normalizePresetStyles(raw as PresetStyles);
+    if (presetStyles['default']) lastStyle = presetStyles['default'];
     figma.ui.postMessage({ type: 'preset-styles', styles: presetStyles } as PluginToUi);
   }
 });
@@ -195,7 +202,7 @@ figma.ui.onmessage = async (msg: UiToPlugin) => {
       break;
     case 'save-preset-styles': {
       const presetStyles = normalizePresetStyles(msg.styles);
-      if (presetStyles.custom) lastStyle = presetStyles.custom;
+      if (presetStyles['default']) lastStyle = presetStyles['default'];
       void figma.clientStorage.setAsync(SAVED_PRESET_STYLES_KEY, presetStyles);
       break;
     }
@@ -1071,9 +1078,8 @@ function normalizeStyle(style: Partial<FlowStyle>): FlowStyle {
 
 function normalizePresetStyles(styles: PresetStyles): PresetStyles {
   const out: PresetStyles = {};
-  for (const name of ['custom', 'success', 'error'] as const) {
-    const style = styles[name];
-    if (style) out[name] = normalizeStyle(style);
+  for (const [name, style] of Object.entries(styles)) {
+    if (style) out[name] = normalizeStyle(style as Partial<FlowStyle>);
   }
   return out;
 }
