@@ -35,7 +35,13 @@ export interface FlowMeta extends FlowStyle {
   toNodeId: string;
   /** Optional text/frame used as label; parented next to the flow vector (not serialized to UI style). */
   labelNodeId?: string;
+  /** Normalized middle-segment offset for elbow paths. 0–1; default 0.5 = natural midpoint.
+   *  Stored on the flow (not on the style) so preset changes don't reset it and endpoint
+   *  moves preserve the same proportional position. */
+  pathOffset?: number;
 }
+
+export const DEFAULT_PATH_OFFSET = 0.5;
 
 export type PresetName = 'custom' | 'success' | 'error';
 export type PresetStyles = Partial<Record<PresetName, FlowStyle>>;
@@ -71,7 +77,8 @@ export type UiToPlugin =
   | { type: 'update-style'; style: FlowStyle }
   | { type: 'swap-direction' }
   | { type: 'resize-ui'; height: number }
-  | { type: 'save-preset-styles'; styles: PresetStyles };
+  | { type: 'save-preset-styles'; styles: PresetStyles }
+  | { type: 'update-path-offset'; offset: number };
 
 // Messages from sandbox -> UI
 export type PluginToUi =
@@ -86,6 +93,12 @@ export type PluginToUi =
       resolvedEndSide?: 'top' | 'right' | 'bottom' | 'left';
       fromName?: string;
       toName?: string;
+      /** Current offset of the selected flow (or shared value across multi-select). */
+      pathOffset?: number;
+      /** True when multi-select contains different offsets — UI shows "Mixed". */
+      pathOffsetMixed?: boolean;
+      /** False when the connector shape doesn't support offset (curved, wrap-around). */
+      pathOffsetSupported?: boolean;
     }
   | { type: 'notify'; message: string }
   | { type: 'preset-styles'; styles: PresetStyles };

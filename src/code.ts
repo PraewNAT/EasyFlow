@@ -11,6 +11,7 @@ import {
   computeStepWaypoints,
   curvedOrthoRadius,
   pathMidpoint,
+  pathOffsetSupport,
   pointOnSide,
   resolveAnchor,
   sideDirection,
@@ -19,6 +20,7 @@ import {
   type Side,
 } from './geometry';
 import {
+  DEFAULT_PATH_OFFSET,
   DEFAULT_STYLE,
   FLOW_NAME_PREFIX,
   PLUGIN_DATA_KEY,
@@ -188,6 +190,9 @@ figma.ui.onmessage = async (msg: UiToPlugin) => {
     case 'swap-direction':
       await handleSwap();
       break;
+    case 'update-path-offset':
+      await handleUpdatePathOffset(msg.offset);
+      break;
     case 'save-preset-styles': {
       const presetStyles = normalizePresetStyles(msg.styles);
       if (presetStyles.custom) lastStyle = presetStyles.custom;
@@ -299,12 +304,46 @@ async function syncUi(): Promise<void> {
       if (fromNode && toNode) {
         const fromBox = absoluteBox(fromNode);
         const toBox = absoluteBox(toNode);
-        payload.resolvedStartSide = resolveAnchor(meta.startAnchor, fromBox, toBox, true);
-        payload.resolvedEndSide = resolveAnchor(meta.endAnchor, fromBox, toBox, false);
+        const startSide = resolveAnchor(meta.startAnchor, fromBox, toBox, true);
+        const endSide = resolveAnchor(meta.endAnchor, fromBox, toBox, false);
+        payload.resolvedStartSide = startSide;
+        payload.resolvedEndSide = endSide;
         payload.fromName = fromNode.name;
         payload.toName = toNode.name;
+        const supported = meta.lineType === 'step'
+          ? pathOffsetSupport(startSide, endSide, fromBox, toBox, pointOnSide(fromBox, startSide), pointOnSide(toBox, endSide)).supported
+          : false;
+        payload.pathOffsetSupported = supported;
+        payload.pathOffset = typeof meta.pathOffset === 'number' ? meta.pathOffset : DEFAULT_PATH_OFFSET;
       }
     }
+  } else if (mode === 'multi-flow') {
+    // Aggregate offset state across selected flows. Skip unsupported shapes
+    // entirely so the slider applies cleanly to whichever flows can use it.
+    const flows = figma.currentPage.selection.filter((n) => readMeta(n) !== null);
+    let anySupported = false;
+    let firstOffset: number | null = null;
+    let mixed = false;
+    for (const f of flows) {
+      const m = readMeta(f);
+      if (!m || m.lineType !== 'step') continue;
+      const fromNode = await figma.getNodeByIdAsync(m.fromNodeId) as SceneNode | null;
+      const toNode = await figma.getNodeByIdAsync(m.toNodeId) as SceneNode | null;
+      if (!fromNode || !toNode) continue;
+      const fromBox = absoluteBox(fromNode);
+      const toBox = absoluteBox(toNode);
+      const startSide = resolveAnchor(m.startAnchor, fromBox, toBox, true);
+      const endSide = resolveAnchor(m.endAnchor, fromBox, toBox, false);
+      const sup = pathOffsetSupport(startSide, endSide, fromBox, toBox, pointOnSide(fromBox, startSide), pointOnSide(toBox, endSide));
+      if (!sup.supported) continue;
+      anySupported = true;
+      const off = typeof m.pathOffset === 'number' ? m.pathOffset : DEFAULT_PATH_OFFSET;
+      if (firstOffset === null) firstOffset = off;
+      else if (Math.abs(off - firstOffset) > 1e-6) mixed = true;
+    }
+    payload.pathOffsetSupported = anySupported;
+    payload.pathOffset = firstOffset !== null ? firstOffset : DEFAULT_PATH_OFFSET;
+    payload.pathOffsetMixed = mixed;
   }
 
   figma.ui.postMessage(payload);
@@ -364,6 +403,34 @@ async function handleSwap(): Promise<void> {
     void enqueueRender(flow, swapped);
   }
   await syncUi();
+}
+
+async function handleUpdatePathOffset(offset: number): Promise<void> {
+  if (!active) return;
+  const clamped = Math.max(0, Math.min(1, Number.isFinite(offset) ? offset : DEFAULT_PATH_OFFSET));
+  const flows = figma.currentPage.selection.filter((n) => readMeta(n) !== null);
+  for (const flow of flows) {
+    const meta = readMeta(flow);
+    if (!meta || (flow.type !== 'FRAME' && flow.type !== 'VECTOR')) continue;
+    // Only elbow (step) connectors are offset-able. Curved or wrap-around
+    // shapes are silently skipped per spec.
+    if (meta.lineType !== 'step') continue;
+    const fromNode = await figma.getNodeByIdAsync(meta.fromNodeId) as SceneNode | null;
+    const toNode = await figma.getNodeByIdAsync(meta.toNodeId) as SceneNode | null;
+    if (!fromNode || !toNode) continue;
+    const fromBox = absoluteBox(fromNode);
+    const toBox = absoluteBox(toNode);
+    const startSide = resolveAnchor(meta.startAnchor, fromBox, toBox, true);
+    const endSide = resolveAnchor(meta.endAnchor, fromBox, toBox, false);
+    const sup = pathOffsetSupport(
+      startSide, endSide, fromBox, toBox,
+      pointOnSide(fromBox, startSide), pointOnSide(toBox, endSide),
+    );
+    if (!sup.supported) continue;
+    const next: FlowMeta = { ...meta, pathOffset: clamped };
+    writeMeta(flow, next);
+    void enqueueRender(flow, next);
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -578,7 +645,7 @@ async function renderVectorFlow(vec: VectorNode, meta: FlowMeta): Promise<void> 
     ];
     segments = [{ start: 0, end: 1, tangentStart: h1, tangentEnd: h2 }];
   } else {
-    const pts = computeStepWaypoints(startPoint, startSide, endPoint, endSide, meta.radius, toBox, fromBox);
+    const pts = computeStepWaypoints(startPoint, startSide, endPoint, endSide, meta.radius, toBox, fromBox, meta.pathOffset);
     if (pts.length < 2) {
       console.warn('[EasyFlow] renderVectorFlow: fewer than 2 waypoints, skipping render');
       return;
@@ -629,7 +696,7 @@ async function renderVectorFlow(vec: VectorNode, meta: FlowMeta): Promise<void> 
   // `vec.vectorPaths = []` write was redundant and forced an extra commit.
   await vec.setVectorNetworkAsync({ vertices: relVerts, segments });
 
-  const mid = pathMidpoint(meta.lineType, startPoint, startSide, endPoint, endSide, meta.radius, toBox, fromBox);
+  const mid = pathMidpoint(meta.lineType, startPoint, startSide, endPoint, endSide, meta.radius, toBox, fromBox, meta.pathOffset);
   const nextMeta = await syncFlowLabel(vec, meta, mid);
   writeMeta(vec, nextMeta);
 }
@@ -671,7 +738,7 @@ async function renderLegacyFrameFlow(wrapper: FrameNode, meta: FlowMeta): Promis
   vector.vectorPaths = [
     {
       windingRule: 'NONE',
-      data: buildPath(meta.lineType, startPoint, startSide, endPoint, endSide, meta.radius, toBox, fromBox),
+      data: buildPath(meta.lineType, startPoint, startSide, endPoint, endSide, meta.radius, toBox, fromBox, meta.pathOffset),
     },
   ];
   wrapper.appendChild(vector);
@@ -683,7 +750,7 @@ async function renderLegacyFrameFlow(wrapper: FrameNode, meta: FlowMeta): Promis
 
   if (meta.label.text.trim().length > 0) {
     const labelNode = await buildLabel(meta);
-    const mid = pathMidpoint(meta.lineType, startPoint, startSide, endPoint, endSide, meta.radius, toBox, fromBox);
+    const mid = pathMidpoint(meta.lineType, startPoint, startSide, endPoint, endSide, meta.radius, toBox, fromBox, meta.pathOffset);
     labelNode.x = mid.x - labelNode.width / 2;
     labelNode.y = mid.y - labelNode.height / 2;
     wrapper.appendChild(labelNode);
@@ -990,7 +1057,9 @@ function writeMeta(node: BaseNode, meta: FlowMeta): void {
 }
 
 function extractStyle(meta: FlowMeta): FlowStyle {
-  const { fromNodeId: _f, toNodeId: _t, labelNodeId: _l, ...style } = meta;
+  // pathOffset lives on the flow, not the style — strip it so preset/style
+  // swaps don't carry it over and so the UI never receives it via msg.style.
+  const { fromNodeId: _f, toNodeId: _t, labelNodeId: _l, pathOffset: _o, ...style } = meta;
   return style;
 }
 
