@@ -1,6 +1,9 @@
 // EasyFlow – Figma sandbox entry point.
-// With documentAccess: "dynamic-page", documentchange handlers must be
-// registered after figma.loadAllPagesAsync().
+// documentAccess: "dynamic-page" requires loadAllPagesAsync() before
+// documentchange events fire. That call is expensive on large multi-page
+// documents, so we defer it until a flow actually exists (or is created)
+// — the plugin opens instantly even in huge files and only pays the load
+// cost when documentchange would actually do useful work.
 
 import {
   bezierHandlesFor,
@@ -42,10 +45,19 @@ let lastStyle: FlowStyle = clone(DEFAULT_STYLE);
 // Track the previous selection so we can determine direction (start → end).
 let lastSelectionIds: string[] = figma.currentPage.selection.map((n) => n.id);
 
-// Register all Figma event handlers immediately.
+// Register selection / page handlers synchronously — both work in
+// dynamic-page mode without loadAllPagesAsync.
 figma.on('selectionchange', () => { void onSelectionChangedAsync(); });
-console.log('[EasyFlow] plugin loaded, selectionchange registered');
-void initializeDocumentAccess();
+figma.on('currentpagechange', () => { void onCurrentPageChangedAsync(); });
+
+// Build the endpoint index from the current page synchronously. This is a
+// shallow scan over top-level children (flows are always page-level — see
+// createFlow), not a recursive findAll, so it's cheap even on busy pages.
+bootstrapEndpointIndexForCurrentPage();
+// If the current page already has flows, kick off the (expensive) full
+// document load so frame moves rerender flows. Runs in the background so
+// the plugin UI is interactive immediately.
+maybeEnableDocChangeForCurrentPage();
 
 // Load persisted preset styles and notify UI when ready.
 const SAVED_PRESET_STYLES_KEY = 'easyflow.presetStyles';
@@ -58,21 +70,46 @@ void figma.clientStorage.getAsync(SAVED_PRESET_STYLES_KEY).then((styles) => {
 });
 
 // ---------------------------------------------------------------------------
+// Lazy full-document access
+// ---------------------------------------------------------------------------
+
+let docAccessPromise: Promise<void> | null = null;
+
+function ensureFullDocAccess(): Promise<void> {
+  if (docAccessPromise) return docAccessPromise;
+  docAccessPromise = (async () => {
+    await figma.loadAllPagesAsync();
+    figma.on('documentchange', onDocumentChanged);
+    // The user may have moved endpoint frames while the load was running.
+    // Queue every tracked flow's endpoints once so the deferred render
+    // catches up to the current positions.
+    if (flowToEndpoints.size > 0) {
+      for (const [, [fromId, toId]] of flowToEndpoints) {
+        pendingFlowGeoEndpointIds.add(fromId);
+        pendingFlowGeoEndpointIds.add(toId);
+      }
+      scheduleFlowRerenderForMovedEndpoints();
+    }
+  })();
+  return docAccessPromise;
+}
+
+function maybeEnableDocChangeForCurrentPage(): void {
+  if (flowToEndpoints.size > 0) void ensureFullDocAccess();
+}
+
+async function onCurrentPageChangedAsync(): Promise<void> {
+  bootstrapEndpointIndexForCurrentPage();
+  maybeEnableDocChangeForCurrentPage();
+  await syncUi();
+}
+
+// ---------------------------------------------------------------------------
 // Selection handler
 // ---------------------------------------------------------------------------
 
-async function initializeDocumentAccess(): Promise<void> {
-  await figma.loadAllPagesAsync();
-  bootstrapEndpointIndex();
-  figma.on('documentchange', onDocumentChanged);
-  console.log('[EasyFlow] document access ready, documentchange registered');
-}
-
 async function onSelectionChangedAsync(): Promise<void> {
   const sel = figma.currentPage.selection;
-  console.log('[EasyFlow] selectionchange — count:', sel.length,
-    '| types:', sel.map(n => n.type).join(','),
-    '| active:', active);
 
   // Promote clicks on inner children (vector/text) to the flow wrapper.
   if (await promoteSelection()) return; // will re-fire selectionchange
@@ -80,21 +117,13 @@ async function onSelectionChangedAsync(): Promise<void> {
   const previousIds = lastSelectionIds;
   lastSelectionIds = sel.map((n) => n.id);
 
-  // Check each condition and log the result for debugging.
-  const c1 = active;
-  const c2 = sel.length === 2;
-  const c3 = sel.length >= 2 && sel[0].id !== sel[1].id;
-  const c4 = sel.every((n) => isConnectableNode(n));
-  const c5 = sel.every((n) => readMeta(n) === null);
-  console.log('[EasyFlow] conditions — active:', c1, '| len=2:', c2, '| diff:', c3,
-    '| connectable:', c4, '| noMeta:', c5);
-
-  // All conditions except noFlow must pass to proceed.
-  if (c1 && c2 && c3 && c4 && c5) {
+  if (active
+    && sel.length === 2
+    && sel[0].id !== sel[1].id
+    && sel.every(isConnectableNode)
+    && sel.every((n) => readMeta(n) === null)) {
     const existing = await findFlowBetween(sel[0].id, sel[1].id);
     if (existing) {
-      // Flow already exists — select it so user can edit/update it.
-      console.log('[EasyFlow] → existing flow found, selecting it');
       figma.currentPage.selection = [existing];
       return;
     }
@@ -105,7 +134,6 @@ async function onSelectionChangedAsync(): Promise<void> {
       const e = sel.find((n) => n.id !== previousIds[0]);
       if (s && e) { startNode = s; endNode = e; }
     }
-    console.log('[EasyFlow] → auto-connect', startNode.name, '→', endNode.name);
     void createAndSelectFlow(startNode, endNode);
     return;
   }
@@ -128,6 +156,9 @@ async function createAndSelectFlow(from: SceneNode, to: SceneNode): Promise<void
     const flow = await createFlow(meta);
     figma.currentPage.selection = [flow];
     // selectionchange will fire → syncUi runs automatically.
+    // Now that at least one flow exists, ensure documentchange is wired
+    // up so future endpoint moves rerender it.
+    void ensureFullDocAccess();
   } catch (err) {
     figma.notify('EasyFlow: ' + String(err));
     await syncUi();
@@ -517,7 +548,7 @@ async function renderVectorFlow(vec: VectorNode, meta: FlowMeta): Promise<void> 
   const toNode = await figma.getNodeByIdAsync(meta.toNodeId) as SceneNode | null;
   if (!fromNode || !toNode || fromNode.removed || toNode.removed) {
     await removeFlowLabel(meta, vec.id);
-    unindexFlow(vec.id, meta.fromNodeId, meta.toNodeId);
+    unindexFlow(vec.id);
     vec.remove();
     return;
   }
@@ -680,32 +711,40 @@ let pendingFlowGeoEndpointIds = new Set<string>();
 let docChangeFlowTimer: ReturnType<typeof setTimeout> | null = null;
 
 function queueFlowRerenderEndpointsFromChanges(event: DocumentChangeEvent): void {
+  // Cheap exit: nothing to track, so don't iterate `documentChanges` at all.
+  // Big documents fire many irrelevant changes (other plugins, user edits
+  // far from any flow); we'd otherwise spend O(changes × properties) just
+  // to discover there's nothing to do.
+  if (endpointToFlows.size === 0 && flowToEndpoints.size === 0 && labelToFlow.size === 0) return;
+
   for (const change of event.documentChanges) {
     if (change.type === 'DELETE') {
-      pendingFlowGeoEndpointIds.add(change.id);
-      void removeLabelsOwnedBy(change.id);
+      // Was this an endpoint? → queue a rerender so the orphaned flow
+      // can detect its endpoint is gone and clean itself up.
+      if (endpointToFlows.has(change.id)) {
+        pendingFlowGeoEndpointIds.add(change.id);
+      }
+      // Was this a flow itself? → drop it from the index. O(1) via the
+      // flowToEndpoints reverse map.
+      if (flowToEndpoints.has(change.id)) {
+        unindexFlow(change.id);
+      }
+      // Was this a label node?
       const ownerFlowId = labelToFlow.get(change.id);
       if (ownerFlowId) {
         labelToFlow.delete(change.id);
         flowToLabel.delete(ownerFlowId);
       }
-      // If a flow itself was deleted, drop it from the index so future
-      // findFlowBetween / drag handlers don't chase a dead id.
-      const epSet = endpointToFlows.get(change.id);
-      if (!epSet) {
-        for (const [epId, flows] of endpointToFlows) {
-          if (flows.has(change.id)) {
-            flows.delete(change.id);
-            if (flows.size === 0) endpointToFlows.delete(epId);
-          }
-        }
-      }
       continue;
     }
     if (change.type !== 'PROPERTY_CHANGE') continue;
-    const touchesGeo = change.properties.some((p) => FLOW_ENDPOINT_GEO_PROPS.has(p));
-    if (!touchesGeo) continue;
-    pendingFlowGeoEndpointIds.add(change.id);
+    // Filter at the source: only endpoints of tracked flows trigger work.
+    if (!endpointToFlows.has(change.id)) continue;
+    let touchesGeo = false;
+    for (const p of change.properties) {
+      if (FLOW_ENDPOINT_GEO_PROPS.has(p)) { touchesGeo = true; break; }
+    }
+    if (touchesGeo) pendingFlowGeoEndpointIds.add(change.id);
   }
 }
 
@@ -720,12 +759,14 @@ function scheduleFlowRerenderForMovedEndpoints(): void {
   }, 12);
 }
 
-// Reverse index: endpoint node id → set of flow node ids that use it.
-// Avoids a full-page findAll on every drag tick (which dominated CPU when
-// many flows were on the page).
+// Reverse indices to avoid full-page scans on every event:
+//   endpoint node id → set of flow ids that use it (for drag rerender)
+//   flow id → its two endpoint ids (for O(1) delete unindex)
 const endpointToFlows = new Map<string, Set<string>>();
+const flowToEndpoints = new Map<string, [string, string]>();
 
 function indexFlowEndpoints(flowId: string, fromId: string, toId: string): void {
+  flowToEndpoints.set(flowId, [fromId, toId]);
   for (const epId of [fromId, toId]) {
     let s = endpointToFlows.get(epId);
     if (!s) { s = new Set(); endpointToFlows.set(epId, s); }
@@ -733,29 +774,33 @@ function indexFlowEndpoints(flowId: string, fromId: string, toId: string): void 
   }
 }
 
-function unindexFlow(flowId: string, fromId: string, toId: string): void {
-  for (const epId of [fromId, toId]) {
+function unindexFlow(flowId: string): void {
+  const eps = flowToEndpoints.get(flowId);
+  if (!eps) return;
+  flowToEndpoints.delete(flowId);
+  for (const epId of eps) {
     const s = endpointToFlows.get(epId);
     if (s) { s.delete(flowId); if (s.size === 0) endpointToFlows.delete(epId); }
   }
 }
 
-/** Build the reverse index from existing flows on the page (called once). */
-function bootstrapEndpointIndex(): void {
+/** Build the reverse index from existing flows on the current page.
+ *  Iterates top-level children only — flows are always appended directly
+ *  to the page (see createFlow), so a recursive findAll would just be
+ *  pulling thousands of unrelated nodes through getPluginData on big pages. */
+function bootstrapEndpointIndexForCurrentPage(): void {
   endpointToFlows.clear();
+  flowToEndpoints.clear();
   flowToLabel.clear();
   labelToFlow.clear();
-  const flows = figma.currentPage.findAll(
-    (n) => (n.type === 'VECTOR' || n.type === 'FRAME') && readMeta(n) !== null,
-  );
-  for (const f of flows) {
-    const m = readMeta(f);
-    if (m) {
-      indexFlowEndpoints(f.id, m.fromNodeId, m.toNodeId);
-      if (m.labelNodeId) {
-        flowToLabel.set(f.id, m.labelNodeId);
-        labelToFlow.set(m.labelNodeId, f.id);
-      }
+  for (const child of figma.currentPage.children) {
+    if (child.type !== 'VECTOR' && child.type !== 'FRAME') continue;
+    const m = readMeta(child);
+    if (!m) continue;
+    indexFlowEndpoints(child.id, m.fromNodeId, m.toNodeId);
+    if (m.labelNodeId) {
+      flowToLabel.set(child.id, m.labelNodeId);
+      labelToFlow.set(m.labelNodeId, child.id);
     }
   }
 }
@@ -920,7 +965,7 @@ async function findFlowBetween(idA: string, idB: string): Promise<SceneNode | nu
   for (const fid of small) {
     if (!large.has(fid)) continue;
     const node = await figma.getNodeByIdAsync(fid) as SceneNode | null;
-    if (!node || node.removed) { unindexFlow(fid, idA, idB); continue; }
+    if (!node || node.removed) { unindexFlow(fid); continue; }
     return node;
   }
   return null;
