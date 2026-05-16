@@ -1,4 +1,17 @@
 // EasyFlow – Figma sandbox entry point.
+// Build marker — bump on every behaviour change so the user can verify
+// Figma actually loaded the latest dist (Figma aggressively caches
+// development plugins; older bundles persist across reloads).
+console.log('[EasyFlow] build 2026-05-17-d loaded');
+
+// Safety net: any rejection that escapes a handler (e.g. a getPluginData
+// throw on a node Figma silently deleted) shouldn't crash the plugin or
+// skip downstream syncUi() calls. Log and swallow.
+(globalThis as { addEventListener?: (e: string, h: (ev: { reason?: unknown; preventDefault?: () => void }) => void) => void })
+  .addEventListener?.('unhandledrejection', (ev) => {
+    console.warn('[EasyFlow] swallowed unhandled rejection:', ev.reason);
+    ev.preventDefault?.();
+  });
 // documentAccess: "dynamic-page" requires loadAllPagesAsync() before
 // documentchange events fire. That call is expensive on large multi-page
 // documents, so we defer it until a flow actually exists (or is created)
@@ -242,21 +255,27 @@ async function promoteSelection(): Promise<boolean> {
 
   for (const n of sel) {
     let target: SceneNode = n;
-    if (!readMeta(n)) {
-      const parent = n.parent;
-      if (parent && readMeta(parent)) {
-        target = parent as SceneNode;
-        changed = true;
-      } else {
-        const ownerId = n.getPluginData(LABEL_OWNER_KEY);
-        if (ownerId) {
-          const owner = await figma.getNodeByIdAsync(ownerId);
-          if (owner && readMeta(owner)) {
-            target = owner as SceneNode;
-            changed = true;
+    try {
+      if (!readMeta(n)) {
+        const parent = n.parent;
+        if (parent && readMeta(parent)) {
+          target = parent as SceneNode;
+          changed = true;
+        } else {
+          const ownerId = n.getPluginData(LABEL_OWNER_KEY);
+          if (ownerId) {
+            const owner = await figma.getNodeByIdAsync(ownerId);
+            if (owner && readMeta(owner)) {
+              target = owner as SceneNode;
+              changed = true;
+            }
           }
         }
       }
+    } catch {
+      // Stale node handle — skip it. Better than letting the rejection
+      // abort selection promotion and downstream syncUi.
+      continue;
     }
     if (!seen.has(target.id)) {
       seen.add(target.id);
@@ -1047,12 +1066,11 @@ async function buildLabel(meta: FlowMeta): Promise<SceneNode> {
 function isConnectableNode(node: SceneNode): boolean {
   // Figma can hand us nodes that were deleted between the selectionchange
   // event firing and this handler running (e.g. mid-create animations).
-  // Reading pluginData / absoluteBoundingBox on a removed node throws,
-  // which propagates as an unhandled rejection and skips the syncUi() at
-  // the end of onSelectionChangedAsync — leaving the panel stale and the
-  // canvas connector out of sync with what the user clicked.
-  if (node.removed) return false;
+  // Even `.removed` access can throw on truly invalidated handles, so
+  // wrap the whole body. If anything throws, treat the node as
+  // unusable rather than letting the rejection skip syncUi().
   try {
+    if (node.removed) return false;
     if (readMeta(node) !== null) return false;
     if (node.getPluginData(LABEL_OWNER_KEY)) return false;
     const b = node.absoluteBoundingBox;
