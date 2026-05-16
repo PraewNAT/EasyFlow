@@ -53,6 +53,48 @@
       .section.muted {
         background: var(--surface-2);
       }
+      /* Accordion: section header is the toggle. Content sits in
+         .accordion-body so the header stays in place when collapsed. */
+      .accordion .accordion-header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        width: 100%;
+        background: transparent;
+        border: 0;
+        padding: 0 0 10px 0;
+        cursor: pointer;
+        color: var(--text-muted);
+        font-size: 11px;
+        font-weight: 500;
+        text-transform: uppercase;
+        letter-spacing: 0.04em;
+      }
+      .accordion .accordion-header:hover {
+        color: var(--text);
+      }
+      .accordion .accordion-header .chev {
+        transition: transform 0.15s ease;
+        flex-shrink: 0;
+      }
+      .accordion.collapsed .accordion-header {
+        padding-bottom: 0;
+      }
+      .accordion.collapsed .accordion-header .chev {
+        transform: rotate(-90deg);
+      }
+      .accordion.collapsed .accordion-body {
+        display: none;
+      }
+      .accordion .accordion-header-aux {
+        font-size: 11px;
+        color: var(--accent);
+        font-weight: 600;
+        text-transform: none;
+        letter-spacing: 0;
+        margin-left: auto;
+        margin-right: 8px;
+      }
       .row {
         display: flex;
         align-items: center;
@@ -487,6 +529,12 @@
         font-size: 11px;
         color: var(--text-muted);
       }
+      .po-slider-head {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 6px;
+      }
       .po-slider-col .path-offset-track {
         margin-bottom: 0;
       }
@@ -846,7 +894,14 @@
     </section>
 
     <!-- Color & line type -->
-    <section class="section">
+    <section class="section accordion" data-accordion="style">
+      <button type="button" class="accordion-header" aria-expanded="true">
+        <span>Style</span>
+        <svg class="chev" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+          <polyline points="6 9 12 15 18 9"></polyline>
+        </svg>
+      </button>
+      <div class="accordion-body">
       <div class="row">
         <div class="field field-stroke-row" style="flex: 2;">
           <span class="swatch" style="background: #00eeff;">
@@ -948,6 +1003,7 @@
           </div>
         </div>
       </div>
+      </div>
     </section>
 
     <!-- Anchor area -->
@@ -969,38 +1025,25 @@
         <div class="frame-label" id="to-name"></div>
       </div>
     </div>
-    <div class="endpoint-info" id="endpoint-info" style="display: none;"></div>
-
     <!-- Path Offset section: per-endpoint anchor sliders (visible only when a flow is selected) -->
     <section class="section path-offset-section" id="path-offset-section" hidden>
-      <div class="path-offset-row">
-        <span class="path-offset-label">Path Offset</span>
-        <button
-          type="button"
-          class="path-offset-reset"
-          id="path-offset-reset"
-          title="Reset offsets"
-          aria-label="Reset offsets"
-        >
-          <svg
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            stroke-width="2.2"
-            stroke-linecap="round"
-            stroke-linejoin="round"
-            width="14"
-            height="14"
-          >
-            <path d="M3 12a9 9 0 1 0 3.2-6.9" />
-            <path d="M3 4v5h5" />
-          </svg>
-        </button>
-      </div>
-
       <div class="po-slider-grid">
         <div class="po-slider-col" id="po-start-row">
-          <span class="po-slider-label">Start</span>
+          <div class="po-slider-head">
+            <span class="po-slider-label">Start path offset</span>
+            <button
+              type="button"
+              class="path-offset-reset"
+              id="po-start-reset"
+              title="Reset start offset"
+              aria-label="Reset start offset"
+            >
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" width="12" height="12">
+                <path d="M3 12a9 9 0 1 0 3.2-6.9" />
+                <path d="M3 4v5h5" />
+              </svg>
+            </button>
+          </div>
           <div class="path-offset-track">
             <div class="path-offset-ticks" aria-hidden="true">
               <span></span><span></span><span></span><span></span><span></span>
@@ -1019,7 +1062,21 @@
         </div>
 
         <div class="po-slider-col" id="po-end-row">
-          <span class="po-slider-label">End</span>
+          <div class="po-slider-head">
+            <span class="po-slider-label">End path offset</span>
+            <button
+              type="button"
+              class="path-offset-reset"
+              id="po-end-reset"
+              title="Reset end offset"
+              aria-label="Reset end offset"
+            >
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" width="12" height="12">
+                <path d="M3 12a9 9 0 1 0 3.2-6.9" />
+                <path d="M3 4v5h5" />
+              </svg>
+            </button>
+          </div>
           <div class="path-offset-track">
             <div class="path-offset-ticks" aria-hidden="true">
               <span></span><span></span><span></span><span></span><span></span>
@@ -1040,7 +1097,14 @@
     </section>
 
     <!-- Label section -->
-    <section class="section">
+    <section class="section accordion" data-accordion="label">
+      <button type="button" class="accordion-header" aria-expanded="true">
+        <span>Label</span>
+        <svg class="chev" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+          <polyline points="6 9 12 15 18 9"></polyline>
+        </svg>
+      </button>
+      <div class="accordion-body">
       <div class="row">
         <input
           type="text"
@@ -1111,14 +1175,19 @@
           </span>
         </div>
       </div>
+      </div>
     </section>
 
     <!-- Presets -->
-    <section class="section preset-section">
-      <div class="preset-header">
-        <div class="preset-label">Presets</div>
-        <div class="preset-current" id="preset-current">Using: Default</div>
-      </div>
+    <section class="section preset-section accordion" data-accordion="presets">
+      <button type="button" class="accordion-header" aria-expanded="true">
+        <span>Presets</span>
+        <span class="accordion-header-aux" id="preset-current">Using: Default</span>
+        <svg class="chev" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+          <polyline points="6 9 12 15 18 9"></polyline>
+        </svg>
+      </button>
+      <div class="accordion-body">
       <!-- Dynamically populated by renderPresets() -->
       <div class="preset-row" id="preset-row"></div>
       <!-- Inline name form (shown when adding a preset) -->
@@ -1126,6 +1195,7 @@
         <input type="text" id="preset-name-input" class="preset-name-input-field" placeholder="Preset name" maxlength="30" />
         <button type="button" id="preset-name-confirm" class="preset-name-btn confirm" title="Confirm">✓</button>
         <button type="button" id="preset-name-cancel" class="preset-name-btn cancel" title="Cancel">✕</button>
+      </div>
       </div>
     </section>
 
@@ -1422,18 +1492,23 @@
         parent.postMessage({ pluginMessage: msg }, '*');
       }
 
-      /** Match Figma panel height to document (no empty gap under content). */
+      /** Match Figma panel height to document (no empty gap under content).
+       *  We measure the bottom of the last visible child rather than the
+       *  documentElement: documentElement reflects the iframe's current size
+       *  (set by Figma's previous resize), so MAX-ing against it prevents
+       *  shrinking when accordions collapse. */
       let __resizeRaf = null;
       function scheduleResize() {
         if (__resizeRaf != null) cancelAnimationFrame(__resizeRaf);
         __resizeRaf = requestAnimationFrame(() => {
           __resizeRaf = null;
-          const h = Math.ceil(
-            Math.max(
-              document.documentElement.getBoundingClientRect().height,
-              document.body.scrollHeight,
-            ),
-          );
+          let bottom = 0;
+          for (const el of document.body.children) {
+            if (el.offsetParent === null && getComputedStyle(el).position !== 'fixed') continue;
+            const rect = el.getBoundingClientRect();
+            if (rect.bottom > bottom) bottom = rect.bottom;
+          }
+          const h = Math.ceil(bottom);
           post({ type: 'resize-ui', height: h });
         });
       }
@@ -1534,17 +1609,8 @@
       }
 
       function renderEndpointInfo() {
-        const info = $('endpoint-info');
         $('from-name').textContent = fromName || '';
         $('to-name').textContent = toName || '';
-        if (mode === 'one-flow' && (fromName || toName)) {
-          info.style.display = 'block';
-          const s = resolvedStartSide || state.startAnchor;
-          const e = resolvedEndSide || state.endAnchor;
-          info.innerHTML = `<b>${escapeHtml(fromName)}</b> · ${s} → ${e} · <b>${escapeHtml(toName)}</b>`;
-        } else {
-          info.style.display = 'none';
-        }
       }
 
       function escapeHtml(s) {
@@ -1799,20 +1865,27 @@
         __pendingEnd = v;
         scheduleAnchorOffsetPost();
       });
-      $('path-offset-reset').addEventListener('click', () => {
+      $('po-start-reset').addEventListener('click', () => {
         startOffsetValue = 0.5;
-        endOffsetValue = 0.5;
         clearStartMixed();
-        clearEndMixed();
         $('po-start-slider').value = '0.5';
-        $('po-end-slider').value = '0.5';
         if (__offsetRaf != null) {
           cancelAnimationFrame(__offsetRaf);
           __offsetRaf = null;
         }
         __pendingStart = null;
+        post({ type: 'update-anchor-offsets', startOffset: 0.5 });
+      });
+      $('po-end-reset').addEventListener('click', () => {
+        endOffsetValue = 0.5;
+        clearEndMixed();
+        $('po-end-slider').value = '0.5';
+        if (__offsetRaf != null) {
+          cancelAnimationFrame(__offsetRaf);
+          __offsetRaf = null;
+        }
         __pendingEnd = null;
-        post({ type: 'update-anchor-offsets', startOffset: 0.5, endOffset: 0.5 });
+        post({ type: 'update-anchor-offsets', endOffset: 0.5 });
       });
 
       // Preset name form
@@ -1862,9 +1935,37 @@
       });
 
       // -----------------------------------------------------------------
+      // Accordion state — persist collapsed/open per-section via localStorage.
+      // First-time use (no saved key) leaves all sections open.
+      // -----------------------------------------------------------------
+      function setAccordionOpen(acc, open) {
+        acc.classList.toggle('collapsed', !open);
+        const header = acc.querySelector('.accordion-header');
+        if (header) header.setAttribute('aria-expanded', open ? 'true' : 'false');
+      }
+      function initAccordions() {
+        document.querySelectorAll('.accordion').forEach((acc) => {
+          const key = 'easyflow.acc.' + acc.dataset.accordion;
+          let saved = null;
+          try { saved = localStorage.getItem(key); } catch (_) {}
+          const isOpen = saved === null ? true : saved === '1';
+          setAccordionOpen(acc, isOpen);
+          const header = acc.querySelector('.accordion-header');
+          if (!header) return;
+          header.addEventListener('click', () => {
+            const next = acc.classList.contains('collapsed');
+            setAccordionOpen(acc, next);
+            try { localStorage.setItem(key, next ? '1' : '0'); } catch (_) {}
+            scheduleResize();
+          });
+        });
+      }
+
+      // -----------------------------------------------------------------
       // Init
       // -----------------------------------------------------------------
       initArrowPickers();
+      initAccordions();
       renderPresets();
       applyStateToUi();
       try {

@@ -448,6 +448,24 @@ async function handleUpdateAnchorOffsets(startOffset?: number, endOffset?: numbe
 
 const renderInFlight = new Set<string>();
 const renderPending = new Map<string, FlowMeta>();
+// Hash of the inputs that produced the last successful render, per flow id.
+// Lets renderFlow short-circuit when nothing visible would change — saves the
+// setVectorNetworkAsync / font-load cycle on redundant style updates, slider
+// drags that release on the same value, and documentchange events that touch
+// unrelated properties on tracked endpoints.
+const lastRenderHash = new Map<string, string>();
+function renderInputHash(meta: FlowMeta, fromBox: Box, toBox: Box): string {
+  return JSON.stringify([
+    meta.strokeColor, meta.opacity, meta.strokeWidth, meta.strokeStyle,
+    meta.lineType, meta.radius,
+    meta.startArrow, meta.endArrow,
+    meta.startAnchor, meta.endAnchor,
+    meta.startOffset ?? 0.5, meta.endOffset ?? 0.5,
+    meta.label,
+    fromBox.x, fromBox.y, fromBox.width, fromBox.height,
+    toBox.x, toBox.y, toBox.width, toBox.height,
+  ]);
+}
 
 async function enqueueRender(node: SceneNode, meta: FlowMeta): Promise<void> {
   const id = node.id;
@@ -620,12 +638,16 @@ async function renderVectorFlow(vec: VectorNode, meta: FlowMeta): Promise<void> 
   if (!fromNode || !toNode || fromNode.removed || toNode.removed) {
     await removeFlowLabel(meta, vec.id);
     unindexFlow(vec.id);
+    lastRenderHash.delete(vec.id);
     vec.remove();
     return;
   }
 
   const fromBox = absoluteBox(fromNode);
   const toBox = absoluteBox(toNode);
+  const hash = renderInputHash(meta, fromBox, toBox);
+  if (lastRenderHash.get(vec.id) === hash) return;
+  lastRenderHash.set(vec.id, hash);
   const startSide = resolveAnchor(meta.startAnchor, fromBox, toBox, true);
   const endSide = resolveAnchor(meta.endAnchor, fromBox, toBox, false);
   const startPoint = pointOnSide(fromBox, startSide, meta.startOffset ?? DEFAULT_ANCHOR_OFFSET);
@@ -709,12 +731,16 @@ async function renderLegacyFrameFlow(wrapper: FrameNode, meta: FlowMeta): Promis
   const fromNode = await figma.getNodeByIdAsync(meta.fromNodeId) as SceneNode | null;
   const toNode = await figma.getNodeByIdAsync(meta.toNodeId) as SceneNode | null;
   if (!fromNode || !toNode || fromNode.removed || toNode.removed) {
+    lastRenderHash.delete(wrapper.id);
     wrapper.remove();
     return;
   }
 
   const fromBox = absoluteBox(fromNode);
   const toBox = absoluteBox(toNode);
+  const hash = renderInputHash(meta, fromBox, toBox);
+  if (lastRenderHash.get(wrapper.id) === hash) return;
+  lastRenderHash.set(wrapper.id, hash);
   const startSide = resolveAnchor(meta.startAnchor, fromBox, toBox, true);
   const endSide = resolveAnchor(meta.endAnchor, fromBox, toBox, false);
   const startPoint = pointOnSide(fromBox, startSide, meta.startOffset ?? DEFAULT_ANCHOR_OFFSET);
@@ -821,7 +847,13 @@ function queueFlowRerenderEndpointsFromChanges(event: DocumentChangeEvent): void
 
 function scheduleFlowRerenderForMovedEndpoints(): void {
   if (pendingFlowGeoEndpointIds.size === 0) return;
-  if (docChangeFlowTimer !== null) clearTimeout(docChangeFlowTimer);
+  // Schedule-once batching: subsequent changes within the window accumulate
+  // into `pendingFlowGeoEndpointIds` instead of pushing the deadline back.
+  // Without this, a continuous drag (which fires documentchange every few
+  // ms) would never flush until the user paused — flows visibly lagged.
+  // Cap the rerender rate at ~one batch per 12 ms (~83 Hz) which is well
+  // above what the user can perceive but well below Figma's per-event cost.
+  if (docChangeFlowTimer !== null) return;
   docChangeFlowTimer = setTimeout(() => {
     docChangeFlowTimer = null;
     const ids = pendingFlowGeoEndpointIds;
@@ -840,6 +872,7 @@ function indexFlowEndpoints(flowId: string, fromId: string, toId: string): void 
 }
 
 function unindexFlow(flowId: string): void {
+  lastRenderHash.delete(flowId);
   const eps = flowToEndpoints.get(flowId);
   if (!eps) return;
   flowToEndpoints.delete(flowId);
