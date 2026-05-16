@@ -1431,9 +1431,22 @@
         if (!p) return;
         activePreset = name;
         state = cloneStyle(p);
+        // Apply preset = full reset including path offsets. Without this the
+        // previously-dragged offsets carry over and the connector visibly
+        // sits off-center even though the user "reset" via preset.
+        startOffsetValue = 0.5;
+        endOffsetValue = 0.5;
+        clearStartMixed();
+        clearEndMixed();
         applyStateToUi();
         updatePresetUi();
         emit();
+        // Push offset reset to selected flow(s) so meta updates and the
+        // connector geometry returns to center. No-op when no flow is
+        // selected (sandbox just skips).
+        if (mode === 'one-flow' || mode === 'multi-flow') {
+          post({ type: 'update-anchor-offsets', startOffset: 0.5, endOffset: 0.5 });
+        }
       }
 
       function deletePreset(name) {
@@ -1786,14 +1799,41 @@
         dot.addEventListener('click', () => {
           const end = dot.dataset.end;
           const side = dot.dataset.side;
+          let resetSide = null;
           if (end === 'from') {
-            state.startAnchor = state.startAnchor === side ? 'auto' : side;
+            const next = state.startAnchor === side ? 'auto' : side;
+            if (next !== state.startAnchor) resetSide = 'start';
+            state.startAnchor = next;
           } else {
-            state.endAnchor = state.endAnchor === side ? 'auto' : side;
+            const next = state.endAnchor === side ? 'auto' : side;
+            if (next !== state.endAnchor) resetSide = 'end';
+            state.endAnchor = next;
+          }
+          // Switching the anchor side rotates the offset axis (Y↔X) so the
+          // stored offset becomes meaningless for the new edge. Reset that
+          // side to 0.5 so the slider stays in sync with what the user sees.
+          if (resetSide === 'start') {
+            startOffsetValue = 0.5;
+            clearStartMixed();
+          } else if (resetSide === 'end') {
+            endOffsetValue = 0.5;
+            clearEndMixed();
           }
           showDraftAnchors = true;
           renderAnchorDots();
-          emit();
+          if (resetSide && (mode === 'one-flow' || mode === 'multi-flow')) {
+            applyPathOffsetUi();
+            const reset = {};
+            reset.type = 'update-anchor-offsets';
+            if (resetSide === 'start') reset.startOffset = 0.5;
+            if (resetSide === 'end') reset.endOffset = 0.5;
+            post(reset);
+          }
+          // Send the anchor side change immediately (not via rAF). The
+          // anchor side is a deliberate user gesture, not a continuous
+          // value, so coalescing it can let it lose to other in-flight
+          // messages and leave the meta out of sync with the panel.
+          emit(true);
         });
       });
 
@@ -1910,10 +1950,15 @@
           resolvedEndSide = msg.resolvedEndSide || null;
           fromName = msg.fromName || '';
           toName = msg.toName || '';
+          // Brush model: don't sync VISUAL style fields (color, stroke,
+          // arrows, label) from the selected flow — the panel keeps the
+          // user's last-set brush. But DO sync structural fields that
+          // describe where the flow connects (anchor sides). Without this,
+          // clicking the same anchor dot the brush already has pinned
+          // toggles it off when the user expected to pin it.
           if (msg.style) {
-            // Backfill any missing fields from defaults so old flows still work.
-            state = Object.assign(JSON.parse(JSON.stringify(DEFAULTS)), msg.style);
-            state.label = Object.assign({}, DEFAULTS.label, msg.style.label || {});
+            state.startAnchor = msg.style.startAnchor || 'auto';
+            state.endAnchor = msg.style.endAnchor || 'auto';
           }
           startOffsetValue =
             typeof msg.startOffset === 'number' ? msg.startOffset : 0.5;

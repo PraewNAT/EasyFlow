@@ -1045,10 +1045,21 @@ async function buildLabel(meta: FlowMeta): Promise<SceneNode> {
 // ---------------------------------------------------------------------------
 
 function isConnectableNode(node: SceneNode): boolean {
-  if (readMeta(node) !== null) return false;
-  if (node.getPluginData(LABEL_OWNER_KEY)) return false;
-  const b = node.absoluteBoundingBox;
-  return !!b && b.width > 0 && b.height > 0;
+  // Figma can hand us nodes that were deleted between the selectionchange
+  // event firing and this handler running (e.g. mid-create animations).
+  // Reading pluginData / absoluteBoundingBox on a removed node throws,
+  // which propagates as an unhandled rejection and skips the syncUi() at
+  // the end of onSelectionChangedAsync — leaving the panel stale and the
+  // canvas connector out of sync with what the user clicked.
+  if (node.removed) return false;
+  try {
+    if (readMeta(node) !== null) return false;
+    if (node.getPluginData(LABEL_OWNER_KEY)) return false;
+    const b = node.absoluteBoundingBox;
+    return !!b && b.width > 0 && b.height > 0;
+  } catch {
+    return false;
+  }
 }
 
 async function findFlowBetween(idA: string, idB: string): Promise<SceneNode | null> {
