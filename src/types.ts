@@ -35,13 +35,16 @@ export interface FlowMeta extends FlowStyle {
   toNodeId: string;
   /** Optional text/frame used as label; parented next to the flow vector (not serialized to UI style). */
   labelNodeId?: string;
-  /** Normalized middle-segment offset for elbow paths. 0–1; default 0.5 = natural midpoint.
-   *  Stored on the flow (not on the style) so preset changes don't reset it and endpoint
-   *  moves preserve the same proportional position. */
-  pathOffset?: number;
+  /** Position of the start anchor along its chosen edge. 0–1; default 0.5 = center.
+   *  For left/right sides: 0 = bottom of edge, 1 = top of edge.
+   *  For top/bottom sides: 0 = left of edge, 1 = right of edge.
+   *  Stored on the flow (not the style) so preset changes don't reset it. */
+  startOffset?: number;
+  /** Same semantics as startOffset but for the end anchor. */
+  endOffset?: number;
 }
 
-export const DEFAULT_PATH_OFFSET = 0.5;
+export const DEFAULT_ANCHOR_OFFSET = 0.5;
 
 export type PresetStyles = Record<string, FlowStyle>;
 
@@ -77,7 +80,7 @@ export type UiToPlugin =
   | { type: 'swap-direction' }
   | { type: 'resize-ui'; height: number }
   | { type: 'save-preset-styles'; styles: PresetStyles }
-  | { type: 'update-path-offset'; offset: number };
+  | { type: 'update-anchor-offsets'; startOffset?: number; endOffset?: number };
 
 // Messages from sandbox -> UI
 export type PluginToUi =
@@ -92,12 +95,12 @@ export type PluginToUi =
       resolvedEndSide?: 'top' | 'right' | 'bottom' | 'left';
       fromName?: string;
       toName?: string;
-      /** Current offset of the selected flow (or shared value across multi-select). */
-      pathOffset?: number;
-      /** True when multi-select contains different offsets — UI shows "Mixed". */
-      pathOffsetMixed?: boolean;
-      /** False when the connector shape doesn't support offset (curved, wrap-around). */
-      pathOffsetSupported?: boolean;
+      /** Per-endpoint anchor offsets along their chosen edges (0–1). */
+      startOffset?: number;
+      endOffset?: number;
+      /** True when multi-select has differing values for that endpoint. */
+      startOffsetMixed?: boolean;
+      endOffsetMixed?: boolean;
     }
   | { type: 'notify'; message: string }
   | { type: 'preset-styles'; styles: PresetStyles };

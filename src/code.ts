@@ -11,7 +11,6 @@ import {
   computeStepWaypoints,
   curvedOrthoRadius,
   pathMidpoint,
-  pathOffsetSupport,
   pointOnSide,
   resolveAnchor,
   sideDirection,
@@ -20,7 +19,7 @@ import {
   type Side,
 } from './geometry';
 import {
-  DEFAULT_PATH_OFFSET,
+  DEFAULT_ANCHOR_OFFSET,
   DEFAULT_STYLE,
   FLOW_NAME_PREFIX,
   PLUGIN_DATA_KEY,
@@ -166,12 +165,16 @@ async function createAndSelectFlow(from: SceneNode, to: SceneNode): Promise<void
   // Newly auto-drawn flows always start with 'auto' anchors so the router
   // picks the best sides from the actual frame positions instead of
   // inheriting whatever the user last pinned on a previous flow.
+  // Explicitly seed offsets to center so a freshly created flow can never
+  // inherit a non-default value (UI also resets sliders on selection sync).
   const meta: FlowMeta = {
     ...clone(lastStyle),
     startAnchor: 'auto',
     endAnchor: 'auto',
     fromNodeId: from.id,
     toNodeId: to.id,
+    startOffset: DEFAULT_ANCHOR_OFFSET,
+    endOffset: DEFAULT_ANCHOR_OFFSET,
   };
   try {
     const flow = await createFlow(meta);
@@ -209,8 +212,8 @@ figma.ui.onmessage = async (msg: UiToPlugin) => {
     case 'swap-direction':
       await handleSwap();
       break;
-    case 'update-path-offset':
-      await handleUpdatePathOffset(msg.offset);
+    case 'update-anchor-offsets':
+      await handleUpdateAnchorOffsets(msg.startOffset, msg.endOffset);
       break;
     case 'save-preset-styles': {
       const presetStyles = normalizePresetStyles(msg.styles);
@@ -329,40 +332,32 @@ async function syncUi(): Promise<void> {
         payload.resolvedEndSide = endSide;
         payload.fromName = fromNode.name;
         payload.toName = toNode.name;
-        const supported = meta.lineType === 'step'
-          ? pathOffsetSupport(startSide, endSide, fromBox, toBox, pointOnSide(fromBox, startSide), pointOnSide(toBox, endSide)).supported
-          : false;
-        payload.pathOffsetSupported = supported;
-        payload.pathOffset = typeof meta.pathOffset === 'number' ? meta.pathOffset : DEFAULT_PATH_OFFSET;
+        payload.startOffset = typeof meta.startOffset === 'number' ? meta.startOffset : DEFAULT_ANCHOR_OFFSET;
+        payload.endOffset = typeof meta.endOffset === 'number' ? meta.endOffset : DEFAULT_ANCHOR_OFFSET;
       }
     }
   } else if (mode === 'multi-flow') {
-    // Aggregate offset state across selected flows. Skip unsupported shapes
-    // entirely so the slider applies cleanly to whichever flows can use it.
+    // Aggregate start/end offsets across selected flows. Each tracks its own
+    // "mixed" state — UI shows the per-slider label independently.
     const flows = figma.currentPage.selection.filter((n) => readMeta(n) !== null);
-    let anySupported = false;
-    let firstOffset: number | null = null;
-    let mixed = false;
+    let firstStart: number | null = null;
+    let firstEnd: number | null = null;
+    let startMixed = false;
+    let endMixed = false;
     for (const f of flows) {
       const m = readMeta(f);
-      if (!m || m.lineType !== 'step') continue;
-      const fromNode = await figma.getNodeByIdAsync(m.fromNodeId) as SceneNode | null;
-      const toNode = await figma.getNodeByIdAsync(m.toNodeId) as SceneNode | null;
-      if (!fromNode || !toNode) continue;
-      const fromBox = absoluteBox(fromNode);
-      const toBox = absoluteBox(toNode);
-      const startSide = resolveAnchor(m.startAnchor, fromBox, toBox, true);
-      const endSide = resolveAnchor(m.endAnchor, fromBox, toBox, false);
-      const sup = pathOffsetSupport(startSide, endSide, fromBox, toBox, pointOnSide(fromBox, startSide), pointOnSide(toBox, endSide));
-      if (!sup.supported) continue;
-      anySupported = true;
-      const off = typeof m.pathOffset === 'number' ? m.pathOffset : DEFAULT_PATH_OFFSET;
-      if (firstOffset === null) firstOffset = off;
-      else if (Math.abs(off - firstOffset) > 1e-6) mixed = true;
+      if (!m) continue;
+      const sOff = typeof m.startOffset === 'number' ? m.startOffset : DEFAULT_ANCHOR_OFFSET;
+      const eOff = typeof m.endOffset === 'number' ? m.endOffset : DEFAULT_ANCHOR_OFFSET;
+      if (firstStart === null) firstStart = sOff;
+      else if (Math.abs(sOff - firstStart) > 1e-6) startMixed = true;
+      if (firstEnd === null) firstEnd = eOff;
+      else if (Math.abs(eOff - firstEnd) > 1e-6) endMixed = true;
     }
-    payload.pathOffsetSupported = anySupported;
-    payload.pathOffset = firstOffset !== null ? firstOffset : DEFAULT_PATH_OFFSET;
-    payload.pathOffsetMixed = mixed;
+    payload.startOffset = firstStart !== null ? firstStart : DEFAULT_ANCHOR_OFFSET;
+    payload.endOffset = firstEnd !== null ? firstEnd : DEFAULT_ANCHOR_OFFSET;
+    payload.startOffsetMixed = startMixed;
+    payload.endOffsetMixed = endMixed;
   }
 
   figma.ui.postMessage(payload);
@@ -424,29 +419,22 @@ async function handleSwap(): Promise<void> {
   await syncUi();
 }
 
-async function handleUpdatePathOffset(offset: number): Promise<void> {
+async function handleUpdateAnchorOffsets(startOffset?: number, endOffset?: number): Promise<void> {
   if (!active) return;
-  const clamped = Math.max(0, Math.min(1, Number.isFinite(offset) ? offset : DEFAULT_PATH_OFFSET));
+  const sClamp = typeof startOffset === 'number' && Number.isFinite(startOffset)
+    ? Math.max(0, Math.min(1, startOffset))
+    : undefined;
+  const eClamp = typeof endOffset === 'number' && Number.isFinite(endOffset)
+    ? Math.max(0, Math.min(1, endOffset))
+    : undefined;
+  if (sClamp === undefined && eClamp === undefined) return;
   const flows = figma.currentPage.selection.filter((n) => readMeta(n) !== null);
   for (const flow of flows) {
     const meta = readMeta(flow);
     if (!meta || (flow.type !== 'FRAME' && flow.type !== 'VECTOR')) continue;
-    // Only elbow (step) connectors are offset-able. Curved or wrap-around
-    // shapes are silently skipped per spec.
-    if (meta.lineType !== 'step') continue;
-    const fromNode = await figma.getNodeByIdAsync(meta.fromNodeId) as SceneNode | null;
-    const toNode = await figma.getNodeByIdAsync(meta.toNodeId) as SceneNode | null;
-    if (!fromNode || !toNode) continue;
-    const fromBox = absoluteBox(fromNode);
-    const toBox = absoluteBox(toNode);
-    const startSide = resolveAnchor(meta.startAnchor, fromBox, toBox, true);
-    const endSide = resolveAnchor(meta.endAnchor, fromBox, toBox, false);
-    const sup = pathOffsetSupport(
-      startSide, endSide, fromBox, toBox,
-      pointOnSide(fromBox, startSide), pointOnSide(toBox, endSide),
-    );
-    if (!sup.supported) continue;
-    const next: FlowMeta = { ...meta, pathOffset: clamped };
+    const next: FlowMeta = { ...meta };
+    if (sClamp !== undefined) next.startOffset = sClamp;
+    if (eClamp !== undefined) next.endOffset = eClamp;
     writeMeta(flow, next);
     void enqueueRender(flow, next);
   }
@@ -640,8 +628,8 @@ async function renderVectorFlow(vec: VectorNode, meta: FlowMeta): Promise<void> 
   const toBox = absoluteBox(toNode);
   const startSide = resolveAnchor(meta.startAnchor, fromBox, toBox, true);
   const endSide = resolveAnchor(meta.endAnchor, fromBox, toBox, false);
-  const startPoint = pointOnSide(fromBox, startSide);
-  const endPoint = pointOnSide(toBox, endSide);
+  const startPoint = pointOnSide(fromBox, startSide, meta.startOffset ?? DEFAULT_ANCHOR_OFFSET);
+  const endPoint = pointOnSide(toBox, endSide, meta.endOffset ?? DEFAULT_ANCHOR_OFFSET);
 
   const capS = arrowTypeToStrokeCap(meta.startArrow);
   const capE = arrowTypeToStrokeCap(meta.endArrow);
@@ -661,7 +649,7 @@ async function renderVectorFlow(vec: VectorNode, meta: FlowMeta): Promise<void> 
     ];
     segments = [{ start: 0, end: 1, tangentStart: h1, tangentEnd: h2 }];
   } else {
-    const pts = computeStepWaypoints(startPoint, startSide, endPoint, endSide, meta.radius, toBox, fromBox, meta.pathOffset);
+    const pts = computeStepWaypoints(startPoint, startSide, endPoint, endSide, meta.radius, toBox, fromBox);
     if (pts.length < 2) {
       console.warn('[EasyFlow] renderVectorFlow: fewer than 2 waypoints, skipping render');
       return;
@@ -712,7 +700,7 @@ async function renderVectorFlow(vec: VectorNode, meta: FlowMeta): Promise<void> 
   // `vec.vectorPaths = []` write was redundant and forced an extra commit.
   await vec.setVectorNetworkAsync({ vertices: relVerts, segments });
 
-  const mid = pathMidpoint(meta.lineType, startPoint, startSide, endPoint, endSide, meta.radius, toBox, fromBox, meta.pathOffset);
+  const mid = pathMidpoint(meta.lineType, startPoint, startSide, endPoint, endSide, meta.radius, toBox, fromBox);
   const nextMeta = await syncFlowLabel(vec, meta, mid);
   writeMeta(vec, nextMeta);
 }
@@ -729,8 +717,8 @@ async function renderLegacyFrameFlow(wrapper: FrameNode, meta: FlowMeta): Promis
   const toBox = absoluteBox(toNode);
   const startSide = resolveAnchor(meta.startAnchor, fromBox, toBox, true);
   const endSide = resolveAnchor(meta.endAnchor, fromBox, toBox, false);
-  const startPoint = pointOnSide(fromBox, startSide);
-  const endPoint = pointOnSide(toBox, endSide);
+  const startPoint = pointOnSide(fromBox, startSide, meta.startOffset ?? DEFAULT_ANCHOR_OFFSET);
+  const endPoint = pointOnSide(toBox, endSide, meta.endOffset ?? DEFAULT_ANCHOR_OFFSET);
 
   for (const child of [...wrapper.children]) child.remove();
 
@@ -754,7 +742,7 @@ async function renderLegacyFrameFlow(wrapper: FrameNode, meta: FlowMeta): Promis
   vector.vectorPaths = [
     {
       windingRule: 'NONE',
-      data: buildPath(meta.lineType, startPoint, startSide, endPoint, endSide, meta.radius, toBox, fromBox, meta.pathOffset),
+      data: buildPath(meta.lineType, startPoint, startSide, endPoint, endSide, meta.radius, toBox, fromBox),
     },
   ];
   wrapper.appendChild(vector);
@@ -766,7 +754,7 @@ async function renderLegacyFrameFlow(wrapper: FrameNode, meta: FlowMeta): Promis
 
   if (meta.label.text.trim().length > 0) {
     const labelNode = await buildLabel(meta);
-    const mid = pathMidpoint(meta.lineType, startPoint, startSide, endPoint, endSide, meta.radius, toBox, fromBox, meta.pathOffset);
+    const mid = pathMidpoint(meta.lineType, startPoint, startSide, endPoint, endSide, meta.radius, toBox, fromBox);
     labelNode.x = mid.x - labelNode.width / 2;
     labelNode.y = mid.y - labelNode.height / 2;
     wrapper.appendChild(labelNode);
@@ -1067,9 +1055,9 @@ function writeMeta(node: BaseNode, meta: FlowMeta): void {
 }
 
 function extractStyle(meta: FlowMeta): FlowStyle {
-  // pathOffset lives on the flow, not the style — strip it so preset/style
-  // swaps don't carry it over and so the UI never receives it via msg.style.
-  const { fromNodeId: _f, toNodeId: _t, labelNodeId: _l, pathOffset: _o, ...style } = meta;
+  // Per-endpoint offsets live on the flow, not the style — strip them so
+  // preset/style swaps don't carry them across flows.
+  const { fromNodeId: _f, toNodeId: _t, labelNodeId: _l, startOffset: _s, endOffset: _e, ...style } = meta;
   return style;
 }
 

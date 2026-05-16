@@ -471,7 +471,26 @@
       .path-offset-track input[type='range']:disabled::-webkit-slider-thumb {
         background: var(--text-muted);
       }
-      .path-offset-section.mixed .path-offset-track input[type='range']::-webkit-slider-thumb {
+      .po-slider-grid {
+        display: flex;
+        gap: 14px;
+        align-items: stretch;
+      }
+      .po-slider-col {
+        flex: 1;
+        min-width: 0;
+        display: flex;
+        flex-direction: column;
+        gap: 4px;
+      }
+      .po-slider-label {
+        font-size: 11px;
+        color: var(--text-muted);
+      }
+      .po-slider-col .path-offset-track {
+        margin-bottom: 0;
+      }
+      .po-slider-col.mixed .path-offset-track input[type='range']::-webkit-slider-thumb {
         opacity: 0;
       }
       .path-offset-mixed-label {
@@ -931,54 +950,6 @@
       </div>
     </section>
 
-    <!-- Path Offset section: visible only when an EasyFlow flow is selected -->
-    <section class="section path-offset-section" id="path-offset-section" hidden>
-      <div class="path-offset-row">
-        <span class="path-offset-label">Path Offset</span>
-        <button
-          type="button"
-          class="path-offset-reset"
-          id="path-offset-reset"
-          title="Reset offset"
-          aria-label="Reset offset"
-        >
-          <svg
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            stroke-width="2.2"
-            stroke-linecap="round"
-            stroke-linejoin="round"
-            width="14"
-            height="14"
-          >
-            <path d="M3 12a9 9 0 1 0 3.2-6.9" />
-            <path d="M3 4v5h5" />
-          </svg>
-        </button>
-      </div>
-      <div class="path-offset-track" id="path-offset-track">
-        <div class="path-offset-ticks" aria-hidden="true">
-          <span></span><span></span><span></span><span></span><span></span>
-        </div>
-        <input
-          type="range"
-          id="path-offset-slider"
-          min="0"
-          max="1"
-          step="0.001"
-          value="0.5"
-          aria-label="Path offset"
-        />
-        <div class="path-offset-mixed-label" id="path-offset-mixed-label" hidden>
-          Mixed
-        </div>
-      </div>
-      <div class="path-offset-help" id="path-offset-help">
-        Adjust the connector path position.
-      </div>
-    </section>
-
     <!-- Anchor area -->
     <div class="anchor-area">
       <div class="anchor-frame" id="from-frame">
@@ -999,6 +970,74 @@
       </div>
     </div>
     <div class="endpoint-info" id="endpoint-info" style="display: none;"></div>
+
+    <!-- Path Offset section: per-endpoint anchor sliders (visible only when a flow is selected) -->
+    <section class="section path-offset-section" id="path-offset-section" hidden>
+      <div class="path-offset-row">
+        <span class="path-offset-label">Path Offset</span>
+        <button
+          type="button"
+          class="path-offset-reset"
+          id="path-offset-reset"
+          title="Reset offsets"
+          aria-label="Reset offsets"
+        >
+          <svg
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="2.2"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+            width="14"
+            height="14"
+          >
+            <path d="M3 12a9 9 0 1 0 3.2-6.9" />
+            <path d="M3 4v5h5" />
+          </svg>
+        </button>
+      </div>
+
+      <div class="po-slider-grid">
+        <div class="po-slider-col" id="po-start-row">
+          <span class="po-slider-label">Start</span>
+          <div class="path-offset-track">
+            <div class="path-offset-ticks" aria-hidden="true">
+              <span></span><span></span><span></span><span></span><span></span>
+            </div>
+            <input
+              type="range"
+              id="po-start-slider"
+              min="0"
+              max="1"
+              step="0.001"
+              value="0.5"
+              aria-label="Start anchor offset"
+            />
+            <div class="path-offset-mixed-label" id="po-start-mixed" hidden>Mixed</div>
+          </div>
+        </div>
+
+        <div class="po-slider-col" id="po-end-row">
+          <span class="po-slider-label">End</span>
+          <div class="path-offset-track">
+            <div class="path-offset-ticks" aria-hidden="true">
+              <span></span><span></span><span></span><span></span><span></span>
+            </div>
+            <input
+              type="range"
+              id="po-end-slider"
+              min="0"
+              max="1"
+              step="0.001"
+              value="0.5"
+              aria-label="End anchor offset"
+            />
+            <div class="path-offset-mixed-label" id="po-end-mixed" hidden>Mixed</div>
+          </div>
+        </div>
+      </div>
+    </section>
 
     <!-- Label section -->
     <section class="section">
@@ -1132,11 +1171,12 @@
       let toName = '';
       let showDraftAnchors = false;
 
-      // Path-offset state. Mirrors what the sandbox sent for the current
-      // selection. Default 0.5 = natural midpoint.
-      let pathOffsetValue = 0.5;
-      let pathOffsetSupported = false;
-      let pathOffsetMixed = false;
+      // Per-endpoint anchor offsets. 0.5 = center of edge; 0 = bottom/left;
+      // 1 = top/right (axis depends on which side the anchor sits on).
+      let startOffsetValue = 0.5;
+      let endOffsetValue = 0.5;
+      let startOffsetMixed = false;
+      let endOffsetMixed = false;
 
       const BUILT_IN_PRESETS = ['default'];
 
@@ -1452,39 +1492,31 @@
         scheduleResize();
       }
 
-      // Show / hide / enable the Path Offset section based on selection state.
-      // Visibility rules:
-      //   • mode = 'one-flow'                          → always visible
-      //     (enabled when shape is offsettable, otherwise disabled with
-      //      "Available for elbow connectors only.")
-      //   • mode = 'multi-flow' AND any flow supports it → visible & enabled
-      //     (shows "Mixed" overlay if selected flows have different offsets)
-      //   • everything else                            → hidden
+      // Show / hide the Path Offset section. Visible whenever a flow (or
+      // flows) is selected. Per-slider "Mixed" overlay appears when a
+      // multi-select has differing values for that endpoint.
       function applyPathOffsetUi() {
         const section = $('path-offset-section');
         if (!section) return;
-        const slider = $('path-offset-slider');
-        const help = $('path-offset-help');
-        const mixedLabel = $('path-offset-mixed-label');
+        const visible = mode === 'one-flow' || mode === 'multi-flow';
+        section.hidden = !visible;
+        if (!visible) return;
 
-        const visible =
-          mode === 'one-flow' || (mode === 'multi-flow' && pathOffsetSupported);
-        if (!visible) {
-          section.hidden = true;
-          return;
-        }
-        section.hidden = false;
+        const startRow = $('po-start-row');
+        const endRow = $('po-end-row');
+        const startSlider = $('po-start-slider');
+        const endSlider = $('po-end-slider');
+        const startMixed = $('po-start-mixed');
+        const endMixed = $('po-end-mixed');
 
-        const disabled = !pathOffsetSupported && !pathOffsetMixed;
-        section.classList.toggle('mixed', pathOffsetMixed);
-        slider.disabled = disabled;
-        mixedLabel.hidden = !pathOffsetMixed;
-        help.textContent = disabled
-          ? 'Available for elbow connectors only.'
-          : 'Adjust the connector path position.';
-        // Center the handle when the selection is mixed so it has a neutral
-        // starting point if the user grabs it.
-        slider.value = String(pathOffsetMixed ? 0.5 : pathOffsetValue);
+        startRow.classList.toggle('mixed', startOffsetMixed);
+        endRow.classList.toggle('mixed', endOffsetMixed);
+        startMixed.hidden = !startOffsetMixed;
+        endMixed.hidden = !endOffsetMixed;
+        // Center the handle visually when mixed so it has a neutral starting
+        // point if the user grabs it.
+        startSlider.value = String(startOffsetMixed ? 0.5 : startOffsetValue);
+        endSlider.value = String(endOffsetMixed ? 0.5 : endOffsetValue);
       }
 
       function renderAnchorDots() {
@@ -1719,43 +1751,68 @@
         }
       });
 
-      // ---- Path Offset slider --------------------------------------------
+      // ---- Anchor offset sliders -----------------------------------------
       // Coalesce drags into one message per animation frame: native range
       // input can fire >30 events/sec which would each trigger a full
       // setVectorNetworkAsync cycle in the sandbox.
       let __offsetRaf = null;
-      function postPathOffset(value) {
-        if (__offsetRaf != null) return;
-        __offsetRaf = requestAnimationFrame(() => {
-          __offsetRaf = null;
-          post({ type: 'update-path-offset', offset: value });
-        });
+      let __pendingStart = null;
+      let __pendingEnd = null;
+      function flushAnchorOffsets() {
+        __offsetRaf = null;
+        const payload = { type: 'update-anchor-offsets' };
+        if (__pendingStart !== null) payload.startOffset = __pendingStart;
+        if (__pendingEnd !== null) payload.endOffset = __pendingEnd;
+        __pendingStart = null;
+        __pendingEnd = null;
+        post(payload);
       }
-      $('path-offset-slider').addEventListener('input', (e) => {
+      function scheduleAnchorOffsetPost() {
+        if (__offsetRaf != null) return;
+        __offsetRaf = requestAnimationFrame(flushAnchorOffsets);
+      }
+      function clearStartMixed() {
+        if (!startOffsetMixed) return;
+        startOffsetMixed = false;
+        $('po-start-row').classList.remove('mixed');
+        $('po-start-mixed').hidden = true;
+      }
+      function clearEndMixed() {
+        if (!endOffsetMixed) return;
+        endOffsetMixed = false;
+        $('po-end-row').classList.remove('mixed');
+        $('po-end-mixed').hidden = true;
+      }
+      $('po-start-slider').addEventListener('input', (e) => {
         const v = parseFloat(e.target.value);
         if (!Number.isFinite(v)) return;
-        pathOffsetValue = v;
-        // Once the user touches the slider we leave the "Mixed" state and
-        // commit one shared offset to every selected supported flow.
-        if (pathOffsetMixed) {
-          pathOffsetMixed = false;
-          $('path-offset-section').classList.remove('mixed');
-          $('path-offset-mixed-label').hidden = true;
-        }
-        postPathOffset(v);
+        startOffsetValue = v;
+        clearStartMixed();
+        __pendingStart = v;
+        scheduleAnchorOffsetPost();
+      });
+      $('po-end-slider').addEventListener('input', (e) => {
+        const v = parseFloat(e.target.value);
+        if (!Number.isFinite(v)) return;
+        endOffsetValue = v;
+        clearEndMixed();
+        __pendingEnd = v;
+        scheduleAnchorOffsetPost();
       });
       $('path-offset-reset').addEventListener('click', () => {
-        pathOffsetValue = 0.5;
-        pathOffsetMixed = false;
-        $('path-offset-slider').value = '0.5';
-        $('path-offset-section').classList.remove('mixed');
-        $('path-offset-mixed-label').hidden = true;
-        // Bypass rAF for the explicit reset gesture — it's a single message.
+        startOffsetValue = 0.5;
+        endOffsetValue = 0.5;
+        clearStartMixed();
+        clearEndMixed();
+        $('po-start-slider').value = '0.5';
+        $('po-end-slider').value = '0.5';
         if (__offsetRaf != null) {
           cancelAnimationFrame(__offsetRaf);
           __offsetRaf = null;
         }
-        post({ type: 'update-path-offset', offset: 0.5 });
+        __pendingStart = null;
+        __pendingEnd = null;
+        post({ type: 'update-anchor-offsets', startOffset: 0.5, endOffset: 0.5 });
       });
 
       // Preset name form
@@ -1785,10 +1842,12 @@
             state = Object.assign(JSON.parse(JSON.stringify(DEFAULTS)), msg.style);
             state.label = Object.assign({}, DEFAULTS.label, msg.style.label || {});
           }
-          pathOffsetValue =
-            typeof msg.pathOffset === 'number' ? msg.pathOffset : 0.5;
-          pathOffsetSupported = !!msg.pathOffsetSupported;
-          pathOffsetMixed = !!msg.pathOffsetMixed;
+          startOffsetValue =
+            typeof msg.startOffset === 'number' ? msg.startOffset : 0.5;
+          endOffsetValue =
+            typeof msg.endOffset === 'number' ? msg.endOffset : 0.5;
+          startOffsetMixed = !!msg.startOffsetMixed;
+          endOffsetMixed = !!msg.endOffsetMixed;
           applyStateToUi();
           updatePresetUi();
           scheduleResize();
