@@ -44,6 +44,14 @@
         flex: 1;
         min-width: 0;
       }
+      /* Compact the toggle row — it sits at the top of the panel and
+         doesn't need the same generous padding as content sections. */
+      .section.toggle-section {
+        padding: 6px 14px;
+      }
+      .toggle-section .toggle-row .label {
+        font-size: 12px;
+      }
       /* Sections */
       .section {
         background: var(--surface);
@@ -1484,11 +1492,19 @@
         const input = $('preset-name-input');
         const name = (input ? input.value : '').trim();
         if (!name) { hideAddPresetInput(); return; }
-        savedPresetStyles[name] = cloneStyle(state);
+        // Newly-created presets start from defaults (cyan) with no label,
+        // not from whatever the user happened to have on screen. Keeps
+        // "+ Add" predictable instead of capturing accidental state.
+        const fresh = cloneStyle(DEFAULTS);
+        fresh.label = Object.assign({}, DEFAULTS.label, { text: '' });
+        savedPresetStyles[name] = fresh;
         activePreset = name;
+        state = cloneStyle(fresh);
+        applyStateToUi();
         hideAddPresetInput();
         renderPresets();
         post({ type: 'save-preset-styles', styles: savedPresetStyles });
+        emit(true);
       }
 
       function savePresetStyle(name, style) {

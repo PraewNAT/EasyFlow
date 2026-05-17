@@ -2,7 +2,7 @@
 // Build marker — bump on every behaviour change so the user can verify
 // Figma actually loaded the latest dist (Figma aggressively caches
 // development plugins; older bundles persist across reloads).
-console.log('[EasyFlow] build 2026-05-17-d loaded');
+console.log('[EasyFlow] build 2026-05-17-g loaded');
 
 // Safety net: any rejection that escapes a handler (e.g. a getPluginData
 // throw on a node Figma silently deleted) shouldn't crash the plugin or
@@ -397,11 +397,25 @@ async function handleCreateOrUpdate(style: FlowStyle): Promise<void> {
       const meta = readMeta(flow);
       if (!meta || (flow.type !== 'FRAME' && flow.type !== 'VECTOR')) continue;
       const next: FlowMeta = { ...meta, ...style };
+      // Style updates (color, anchor side, preset, etc.) always
+      // re-center the path offsets. The user's stated invariant is
+      // "offset must always be at the center of each frame" — this
+      // enforces it at the meta level so neither stale UI state nor
+      // dropped offset messages can desync the rendered geometry
+      // from the slider. Per-flow drag adjustments still work
+      // (update-anchor-offsets path leaves style untouched).
+      next.startOffset = DEFAULT_ANCHOR_OFFSET;
+      next.endOffset = DEFAULT_ANCHOR_OFFSET;
       writeMeta(flow, next);
       // Coalesce: in-flight render absorbs new style; we don't await so the
       // UI message handler returns immediately and Figma stays responsive.
       void enqueueRender(flow, next);
     }
+    // Push the canonical state back to the UI. Without this, the UI keeps
+    // whatever it locally set (e.g. an offset slider value that the
+    // sandbox just overwrote because the anchor side changed) and the two
+    // drift out of sync. Sandbox is the source of truth; UI mirrors it.
+    void syncUi();
     return;
   }
 
