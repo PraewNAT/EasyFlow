@@ -42,9 +42,14 @@ export interface FlowMeta extends FlowStyle {
   startOffset?: number;
   /** Same semantics as startOffset but for the end anchor. */
   endOffset?: number;
+  /** Position of the middle (between) segment along the start→end axis.
+   *  0 = closer to start, 0.5 = natural midpoint, 1 = closer to end.
+   *  Has no effect on straight lines (no middle segment to slide). */
+  betweenOffset?: number;
 }
 
 export const DEFAULT_ANCHOR_OFFSET = 0.5;
+export const DEFAULT_BETWEEN_OFFSET = 0.5;
 
 export type PresetStyles = Record<string, FlowStyle>;
 
@@ -80,7 +85,12 @@ export type UiToPlugin =
   | { type: 'swap-direction' }
   | { type: 'resize-ui'; height: number }
   | { type: 'save-preset-styles'; styles: PresetStyles }
-  | { type: 'update-anchor-offsets'; startOffset?: number; endOffset?: number };
+  | {
+      type: 'update-anchor-offsets';
+      startOffset?: number;
+      endOffset?: number;
+      betweenOffset?: number;
+    };
 
 // Messages from sandbox -> UI
 export type PluginToUi =
@@ -98,12 +108,24 @@ export type PluginToUi =
       /** Per-endpoint anchor offsets along their chosen edges (0–1). */
       startOffset?: number;
       endOffset?: number;
+      /** Position of the middle segment along start→end. 0.5 = natural. */
+      betweenOffset?: number;
       /** True when multi-select has differing values for that endpoint. */
       startOffsetMixed?: boolean;
       endOffsetMixed?: boolean;
+      betweenOffsetMixed?: boolean;
+      /** False when the connector has no slidable middle segment (e.g.
+       *  a perfectly straight line). UI disables the slider in that case. */
+      betweenOffsetSupported?: boolean;
     }
   | { type: 'notify'; message: string }
-  | { type: 'preset-styles'; styles: PresetStyles };
+  | { type: 'preset-styles'; styles: PresetStyles }
+  /** Lightweight update for the Between slider's enabled state — sent
+   *  while the user drags Start/End sliders, since changing those
+   *  values can transition the path between straight and bent shapes.
+   *  We avoid sending a full 'selection' sync so the in-flight slider
+   *  drag isn't disturbed. */
+  | { type: 'between-support'; supported: boolean };
 
 export const PLUGIN_DATA_KEY = 'easyflow.meta';
 export const FLOW_NAME_PREFIX = 'EasyFlow ›';

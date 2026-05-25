@@ -523,7 +523,7 @@
       }
       .po-slider-grid {
         display: flex;
-        gap: 14px;
+        gap: 10px;
         align-items: stretch;
       }
       .po-slider-col {
@@ -536,6 +536,13 @@
       .po-slider-label {
         font-size: 11px;
         color: var(--text-muted);
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+      .po-slider-col.disabled .po-slider-label,
+      .po-slider-col.disabled .path-offset-reset {
+        opacity: 0.45;
       }
       .po-slider-head {
         display: flex;
@@ -1101,6 +1108,39 @@
             <div class="path-offset-mixed-label" id="po-end-mixed" hidden>Mixed</div>
           </div>
         </div>
+
+        <div class="po-slider-col" id="po-between-row">
+          <div class="po-slider-head">
+            <span class="po-slider-label">Between offset</span>
+            <button
+              type="button"
+              class="path-offset-reset"
+              id="po-between-reset"
+              title="Reset between offset"
+              aria-label="Reset between offset"
+            >
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" width="12" height="12">
+                <path d="M3 12a9 9 0 1 0 3.2-6.9" />
+                <path d="M3 4v5h5" />
+              </svg>
+            </button>
+          </div>
+          <div class="path-offset-track">
+            <div class="path-offset-ticks" aria-hidden="true">
+              <span></span><span></span><span></span><span></span><span></span>
+            </div>
+            <input
+              type="range"
+              id="po-between-slider"
+              min="0"
+              max="1"
+              step="0.001"
+              value="0.5"
+              aria-label="Between (middle segment) offset"
+            />
+            <div class="path-offset-mixed-label" id="po-between-mixed" hidden>Mixed</div>
+          </div>
+        </div>
       </div>
     </section>
 
@@ -1253,8 +1293,13 @@
       // 1 = top/right (axis depends on which side the anchor sits on).
       let startOffsetValue = 0.5;
       let endOffsetValue = 0.5;
+      let betweenOffsetValue = 0.5;
       let startOffsetMixed = false;
       let endOffsetMixed = false;
+      let betweenOffsetMixed = false;
+      // Between slider is disabled when the path has no slidable middle
+      // segment (straight horizontal/vertical, or wrap-around routing).
+      let betweenOffsetSupported = true;
 
       const BUILT_IN_PRESETS = ['default'];
 
@@ -1608,19 +1653,30 @@
 
         const startRow = $('po-start-row');
         const endRow = $('po-end-row');
+        const betweenRow = $('po-between-row');
         const startSlider = $('po-start-slider');
         const endSlider = $('po-end-slider');
+        const betweenSlider = $('po-between-slider');
         const startMixed = $('po-start-mixed');
         const endMixed = $('po-end-mixed');
+        const betweenMixed = $('po-between-mixed');
 
         startRow.classList.toggle('mixed', startOffsetMixed);
         endRow.classList.toggle('mixed', endOffsetMixed);
+        betweenRow.classList.toggle('mixed', betweenOffsetMixed);
         startMixed.hidden = !startOffsetMixed;
         endMixed.hidden = !endOffsetMixed;
+        betweenMixed.hidden = !betweenOffsetMixed;
         // Center the handle visually when mixed so it has a neutral starting
         // point if the user grabs it.
         startSlider.value = String(startOffsetMixed ? 0.5 : startOffsetValue);
         endSlider.value = String(endOffsetMixed ? 0.5 : endOffsetValue);
+        betweenSlider.value = String(betweenOffsetMixed ? 0.5 : betweenOffsetValue);
+        // Disable the between slider for straight-line / wrap-around paths
+        // where there's no meaningful middle segment to slide.
+        betweenSlider.disabled = !betweenOffsetSupported;
+        betweenRow.classList.toggle('disabled', !betweenOffsetSupported);
+        $('po-between-reset').disabled = !betweenOffsetSupported;
       }
 
       function renderAnchorDots() {
@@ -1880,13 +1936,16 @@
       let __offsetRaf = null;
       let __pendingStart = null;
       let __pendingEnd = null;
+      let __pendingBetween = null;
       function flushAnchorOffsets() {
         __offsetRaf = null;
         const payload = { type: 'update-anchor-offsets' };
         if (__pendingStart !== null) payload.startOffset = __pendingStart;
         if (__pendingEnd !== null) payload.endOffset = __pendingEnd;
+        if (__pendingBetween !== null) payload.betweenOffset = __pendingBetween;
         __pendingStart = null;
         __pendingEnd = null;
+        __pendingBetween = null;
         post(payload);
       }
       function scheduleAnchorOffsetPost() {
@@ -1905,6 +1964,12 @@
         $('po-end-row').classList.remove('mixed');
         $('po-end-mixed').hidden = true;
       }
+      function clearBetweenMixed() {
+        if (!betweenOffsetMixed) return;
+        betweenOffsetMixed = false;
+        $('po-between-row').classList.remove('mixed');
+        $('po-between-mixed').hidden = true;
+      }
       $('po-start-slider').addEventListener('input', (e) => {
         const v = parseFloat(e.target.value);
         if (!Number.isFinite(v)) return;
@@ -1919,6 +1984,14 @@
         endOffsetValue = v;
         clearEndMixed();
         __pendingEnd = v;
+        scheduleAnchorOffsetPost();
+      });
+      $('po-between-slider').addEventListener('input', (e) => {
+        const v = parseFloat(e.target.value);
+        if (!Number.isFinite(v)) return;
+        betweenOffsetValue = v;
+        clearBetweenMixed();
+        __pendingBetween = v;
         scheduleAnchorOffsetPost();
       });
       $('po-start-reset').addEventListener('click', () => {
@@ -1942,6 +2015,17 @@
         }
         __pendingEnd = null;
         post({ type: 'update-anchor-offsets', endOffset: 0.5 });
+      });
+      $('po-between-reset').addEventListener('click', () => {
+        betweenOffsetValue = 0.5;
+        clearBetweenMixed();
+        $('po-between-slider').value = '0.5';
+        if (__offsetRaf != null) {
+          cancelAnimationFrame(__offsetRaf);
+          __offsetRaf = null;
+        }
+        __pendingBetween = null;
+        post({ type: 'update-anchor-offsets', betweenOffset: 0.5 });
       });
 
       // Preset name form
@@ -1980,11 +2064,22 @@
             typeof msg.startOffset === 'number' ? msg.startOffset : 0.5;
           endOffsetValue =
             typeof msg.endOffset === 'number' ? msg.endOffset : 0.5;
+          betweenOffsetValue =
+            typeof msg.betweenOffset === 'number' ? msg.betweenOffset : 0.5;
           startOffsetMixed = !!msg.startOffsetMixed;
           endOffsetMixed = !!msg.endOffsetMixed;
+          betweenOffsetMixed = !!msg.betweenOffsetMixed;
+          // Default to supported when the sandbox didn't report it (e.g.
+          // initial load before a flow is selected) so the slider isn't
+          // perma-disabled — applyPathOffsetUi only uses this flag when
+          // the path-offset section is visible.
+          betweenOffsetSupported = msg.betweenOffsetSupported !== false;
           applyStateToUi();
           updatePresetUi();
           scheduleResize();
+        } else if (msg.type === 'between-support') {
+          betweenOffsetSupported = !!msg.supported;
+          applyPathOffsetUi();
         } else if (msg.type === 'preset-styles') {
           savedPresetStyles = normalizePresetStyles(msg.styles || {});
           if (mode !== 'one-flow' && mode !== 'multi-flow') {

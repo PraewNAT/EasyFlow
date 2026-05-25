@@ -2,7 +2,7 @@
 // Build marker — bump on every behaviour change so the user can verify
 // Figma actually loaded the latest dist (Figma aggressively caches
 // development plugins; older bundles persist across reloads).
-console.log('[EasyFlow] build 2026-05-17-g loaded');
+console.log('[EasyFlow] build 2026-05-17-i loaded');
 
 // Safety net: any rejection that escapes a handler (e.g. a getPluginData
 // throw on a node Figma silently deleted) shouldn't crash the plugin or
@@ -19,6 +19,7 @@ console.log('[EasyFlow] build 2026-05-17-g loaded');
 // cost when documentchange would actually do useful work.
 
 import {
+  betweenOffsetSupported,
   bezierHandlesFor,
   buildPath,
   computeStepWaypoints,
@@ -33,6 +34,7 @@ import {
 } from './geometry';
 import {
   DEFAULT_ANCHOR_OFFSET,
+  DEFAULT_BETWEEN_OFFSET,
   DEFAULT_STYLE,
   FLOW_NAME_PREFIX,
   PLUGIN_DATA_KEY,
@@ -188,6 +190,7 @@ async function createAndSelectFlow(from: SceneNode, to: SceneNode): Promise<void
     toNodeId: to.id,
     startOffset: DEFAULT_ANCHOR_OFFSET,
     endOffset: DEFAULT_ANCHOR_OFFSET,
+    betweenOffset: DEFAULT_BETWEEN_OFFSET,
   };
   try {
     const flow = await createFlow(meta);
@@ -226,7 +229,7 @@ figma.ui.onmessage = async (msg: UiToPlugin) => {
       await handleSwap();
       break;
     case 'update-anchor-offsets':
-      await handleUpdateAnchorOffsets(msg.startOffset, msg.endOffset);
+      await handleUpdateAnchorOffsets(msg.startOffset, msg.endOffset, msg.betweenOffset);
       break;
     case 'save-preset-styles': {
       const presetStyles = normalizePresetStyles(msg.styles);
@@ -353,6 +356,11 @@ async function syncUi(): Promise<void> {
         payload.toName = toNode.name;
         payload.startOffset = typeof meta.startOffset === 'number' ? meta.startOffset : DEFAULT_ANCHOR_OFFSET;
         payload.endOffset = typeof meta.endOffset === 'number' ? meta.endOffset : DEFAULT_ANCHOR_OFFSET;
+        payload.betweenOffset = typeof meta.betweenOffset === 'number' ? meta.betweenOffset : DEFAULT_BETWEEN_OFFSET;
+        const startPt = pointOnSide(fromBox, startSide, payload.startOffset);
+        const endPt = pointOnSide(toBox, endSide, payload.endOffset);
+        payload.betweenOffsetSupported = meta.lineType === 'step'
+          && betweenOffsetSupported(startSide, endSide, startPt, endPt, fromBox, toBox);
       }
     }
   } else if (mode === 'multi-flow') {
@@ -361,22 +369,32 @@ async function syncUi(): Promise<void> {
     const flows = figma.currentPage.selection.filter((n) => readMeta(n) !== null);
     let firstStart: number | null = null;
     let firstEnd: number | null = null;
+    let firstBetween: number | null = null;
     let startMixed = false;
     let endMixed = false;
+    let betweenMixed = false;
+    let anyBetweenSupported = false;
     for (const f of flows) {
       const m = readMeta(f);
       if (!m) continue;
       const sOff = typeof m.startOffset === 'number' ? m.startOffset : DEFAULT_ANCHOR_OFFSET;
       const eOff = typeof m.endOffset === 'number' ? m.endOffset : DEFAULT_ANCHOR_OFFSET;
+      const bOff = typeof m.betweenOffset === 'number' ? m.betweenOffset : DEFAULT_BETWEEN_OFFSET;
       if (firstStart === null) firstStart = sOff;
       else if (Math.abs(sOff - firstStart) > 1e-6) startMixed = true;
       if (firstEnd === null) firstEnd = eOff;
       else if (Math.abs(eOff - firstEnd) > 1e-6) endMixed = true;
+      if (firstBetween === null) firstBetween = bOff;
+      else if (Math.abs(bOff - firstBetween) > 1e-6) betweenMixed = true;
+      if (m.lineType === 'step') anyBetweenSupported = true;
     }
     payload.startOffset = firstStart !== null ? firstStart : DEFAULT_ANCHOR_OFFSET;
     payload.endOffset = firstEnd !== null ? firstEnd : DEFAULT_ANCHOR_OFFSET;
+    payload.betweenOffset = firstBetween !== null ? firstBetween : DEFAULT_BETWEEN_OFFSET;
     payload.startOffsetMixed = startMixed;
     payload.endOffsetMixed = endMixed;
+    payload.betweenOffsetMixed = betweenMixed;
+    payload.betweenOffsetSupported = anyBetweenSupported;
   }
 
   figma.ui.postMessage(payload);
@@ -406,6 +424,7 @@ async function handleCreateOrUpdate(style: FlowStyle): Promise<void> {
       // (update-anchor-offsets path leaves style untouched).
       next.startOffset = DEFAULT_ANCHOR_OFFSET;
       next.endOffset = DEFAULT_ANCHOR_OFFSET;
+      next.betweenOffset = DEFAULT_BETWEEN_OFFSET;
       writeMeta(flow, next);
       // Coalesce: in-flight render absorbs new style; we don't await so the
       // UI message handler returns immediately and Figma stays responsive.
@@ -452,7 +471,11 @@ async function handleSwap(): Promise<void> {
   await syncUi();
 }
 
-async function handleUpdateAnchorOffsets(startOffset?: number, endOffset?: number): Promise<void> {
+async function handleUpdateAnchorOffsets(
+  startOffset?: number,
+  endOffset?: number,
+  betweenOffset?: number,
+): Promise<void> {
   if (!active) return;
   const sClamp = typeof startOffset === 'number' && Number.isFinite(startOffset)
     ? Math.max(0, Math.min(1, startOffset))
@@ -460,7 +483,10 @@ async function handleUpdateAnchorOffsets(startOffset?: number, endOffset?: numbe
   const eClamp = typeof endOffset === 'number' && Number.isFinite(endOffset)
     ? Math.max(0, Math.min(1, endOffset))
     : undefined;
-  if (sClamp === undefined && eClamp === undefined) return;
+  const bClamp = typeof betweenOffset === 'number' && Number.isFinite(betweenOffset)
+    ? Math.max(0, Math.min(1, betweenOffset))
+    : undefined;
+  if (sClamp === undefined && eClamp === undefined && bClamp === undefined) return;
   const flows = figma.currentPage.selection.filter((n) => readMeta(n) !== null);
   for (const flow of flows) {
     const meta = readMeta(flow);
@@ -468,9 +494,41 @@ async function handleUpdateAnchorOffsets(startOffset?: number, endOffset?: numbe
     const next: FlowMeta = { ...meta };
     if (sClamp !== undefined) next.startOffset = sClamp;
     if (eClamp !== undefined) next.endOffset = eClamp;
+    if (bClamp !== undefined) next.betweenOffset = bClamp;
     writeMeta(flow, next);
     void enqueueRender(flow, next);
   }
+  // If start/end moved, the path may have transitioned between
+  // straight ↔ bent shapes — push just the Between slider's enabled
+  // state so the panel can re-enable/disable it without disturbing
+  // the active slider drag.
+  if (sClamp !== undefined || eClamp !== undefined) {
+    void postBetweenSupportFromSelection();
+  }
+}
+
+async function postBetweenSupportFromSelection(): Promise<void> {
+  const flows = figma.currentPage.selection.filter((n) => readMeta(n) !== null);
+  if (flows.length === 0) return;
+  let supported = false;
+  for (const flow of flows) {
+    const meta = readMeta(flow);
+    if (!meta || meta.lineType !== 'step') continue;
+    const fromNode = await figma.getNodeByIdAsync(meta.fromNodeId) as SceneNode | null;
+    const toNode = await figma.getNodeByIdAsync(meta.toNodeId) as SceneNode | null;
+    if (!fromNode || !toNode) continue;
+    const fromBox = absoluteBox(fromNode);
+    const toBox = absoluteBox(toNode);
+    const startSide = resolveAnchor(meta.startAnchor, fromBox, toBox, true);
+    const endSide = resolveAnchor(meta.endAnchor, fromBox, toBox, false);
+    const startPt = pointOnSide(fromBox, startSide, meta.startOffset ?? DEFAULT_ANCHOR_OFFSET);
+    const endPt = pointOnSide(toBox, endSide, meta.endOffset ?? DEFAULT_ANCHOR_OFFSET);
+    if (betweenOffsetSupported(startSide, endSide, startPt, endPt, fromBox, toBox)) {
+      supported = true;
+      break;
+    }
+  }
+  figma.ui.postMessage({ type: 'between-support', supported });
 }
 
 // ---------------------------------------------------------------------------
@@ -493,7 +551,7 @@ function renderInputHash(meta: FlowMeta, fromBox: Box, toBox: Box): string {
     meta.lineType, meta.radius,
     meta.startArrow, meta.endArrow,
     meta.startAnchor, meta.endAnchor,
-    meta.startOffset ?? 0.5, meta.endOffset ?? 0.5,
+    meta.startOffset ?? 0.5, meta.endOffset ?? 0.5, meta.betweenOffset ?? 0.5,
     meta.label,
     fromBox.x, fromBox.y, fromBox.width, fromBox.height,
     toBox.x, toBox.y, toBox.width, toBox.height,
@@ -704,7 +762,7 @@ async function renderVectorFlow(vec: VectorNode, meta: FlowMeta): Promise<void> 
     ];
     segments = [{ start: 0, end: 1, tangentStart: h1, tangentEnd: h2 }];
   } else {
-    const pts = computeStepWaypoints(startPoint, startSide, endPoint, endSide, meta.radius, toBox, fromBox);
+    const pts = computeStepWaypoints(startPoint, startSide, endPoint, endSide, meta.radius, toBox, fromBox, meta.betweenOffset);
     if (pts.length < 2) {
       console.warn('[EasyFlow] renderVectorFlow: fewer than 2 waypoints, skipping render');
       return;
@@ -755,7 +813,7 @@ async function renderVectorFlow(vec: VectorNode, meta: FlowMeta): Promise<void> 
   // `vec.vectorPaths = []` write was redundant and forced an extra commit.
   await vec.setVectorNetworkAsync({ vertices: relVerts, segments });
 
-  const mid = pathMidpoint(meta.lineType, startPoint, startSide, endPoint, endSide, meta.radius, toBox, fromBox);
+  const mid = pathMidpoint(meta.lineType, startPoint, startSide, endPoint, endSide, meta.radius, toBox, fromBox, meta.betweenOffset);
   const nextMeta = await syncFlowLabel(vec, meta, mid);
   writeMeta(vec, nextMeta);
 }
@@ -801,7 +859,7 @@ async function renderLegacyFrameFlow(wrapper: FrameNode, meta: FlowMeta): Promis
   vector.vectorPaths = [
     {
       windingRule: 'NONE',
-      data: buildPath(meta.lineType, startPoint, startSide, endPoint, endSide, meta.radius, toBox, fromBox),
+      data: buildPath(meta.lineType, startPoint, startSide, endPoint, endSide, meta.radius, toBox, fromBox, meta.betweenOffset),
     },
   ];
   wrapper.appendChild(vector);
@@ -813,7 +871,7 @@ async function renderLegacyFrameFlow(wrapper: FrameNode, meta: FlowMeta): Promis
 
   if (meta.label.text.trim().length > 0) {
     const labelNode = await buildLabel(meta);
-    const mid = pathMidpoint(meta.lineType, startPoint, startSide, endPoint, endSide, meta.radius, toBox, fromBox);
+    const mid = pathMidpoint(meta.lineType, startPoint, startSide, endPoint, endSide, meta.radius, toBox, fromBox, meta.betweenOffset);
     labelNode.x = mid.x - labelNode.width / 2;
     labelNode.y = mid.y - labelNode.height / 2;
     wrapper.appendChild(labelNode);
@@ -1131,9 +1189,14 @@ function writeMeta(node: BaseNode, meta: FlowMeta): void {
 }
 
 function extractStyle(meta: FlowMeta): FlowStyle {
-  // Per-endpoint offsets live on the flow, not the style — strip them so
-  // preset/style swaps don't carry them across flows.
-  const { fromNodeId: _f, toNodeId: _t, labelNodeId: _l, startOffset: _s, endOffset: _e, ...style } = meta;
+  // Per-flow offsets (startOffset, endOffset, betweenOffset) live on the
+  // flow, not the style — strip them so preset/style swaps don't carry
+  // them across flows.
+  const {
+    fromNodeId: _f, toNodeId: _t, labelNodeId: _l,
+    startOffset: _s, endOffset: _e, betweenOffset: _b,
+    ...style
+  } = meta;
   return style;
 }
 

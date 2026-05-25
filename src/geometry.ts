@@ -85,17 +85,62 @@ function laneXForOppositeVerticalSides(fromBox: Box, toBox: Box, p1: Point, p2: 
   return Math.abs(mid - leftLane) <= Math.abs(mid - rightLane) ? leftLane : rightLane;
 }
 
+/** Returns true when the connector has a middle segment whose position
+ *  can be meaningfully slid by the Between slider. False for cases where
+ *  the path degenerates to a straight line or wraps around (no single
+ *  middle spine). */
+export function betweenOffsetSupported(
+  s1: Side, s2: Side,
+  p1: Point, p2: Point,
+  fromBox?: Box, toBox?: Box,
+): boolean {
+  const h1 = s1 === 'left' || s1 === 'right';
+  const h2 = s2 === 'left' || s2 === 'right';
+  // H↔H opposite sides degenerate to straight horizontal when p1.y == p2.y.
+  if (h1 && h2) {
+    const bothLeft = s1 === 'left' && s2 === 'left';
+    const bothRight = s1 === 'right' && s2 === 'right';
+    if (!bothLeft && !bothRight && Math.abs(p1.y - p2.y) < 0.5) return false;
+    return true;
+  }
+  // V↔V facing degenerates to straight vertical when p1.x == p2.x.
+  if (!h1 && !h2) {
+    if ((s1 === 'top' && s2 === 'bottom') || (s1 === 'bottom' && s2 === 'top')) {
+      const facingVertically =
+        (s1 === 'bottom' && s2 === 'top' && p1.y <= p2.y) ||
+        (s1 === 'top' && s2 === 'bottom' && p1.y >= p2.y);
+      if (!facingVertically) return false; // wrap-around: no single spine
+      if (Math.abs(p1.x - p2.x) < 0.5) return false;
+    }
+    return true;
+  }
+  // Mixed h↔v always has a corner — slidable unless we couldn't route at all.
+  return !!toBox;
+  void fromBox;
+}
+
+/** Map slider t (0..1) → delta around the natural same-side runway midpoint.
+ *  ±2·OUT keeps the spine visually within the box neighborhood. */
+function sameSideDelta(t: number, OUT: number): number {
+  return (t - 0.5) * 4 * OUT;
+}
+
 export function computeStepWaypoints(
   p1: Point, s1: Side,
   p2: Point, s2: Side,
   padding: number,
   toBox?: Box,
   fromBox?: Box,
+  between?: number,
 ): Point[] {
   const h1 = s1 === 'left' || s1 === 'right';
   const h2 = s2 === 'left' || s2 === 'right';
   /** Clearance beyond stroke radius — larger ⇒ line sits further outside frames (orthogonal + mixed bends). Previous base was ~28px. */
   const OUT = Math.max(padding, 56);
+  /** Middle-segment offset; 0.5 reproduces the original default geometry. */
+  const t = typeof between === 'number' && Number.isFinite(between)
+    ? Math.max(0, Math.min(1, between))
+    : 0.5;
   // --- H→H (e.g. right → left) ---
   if (h1 && h2) {
     const exitX = s1 === 'right' ? p1.x + OUT : p1.x - OUT;
@@ -104,11 +149,19 @@ export function computeStepWaypoints(
     const bothRight = s1 === 'right' && s2 === 'right';
     let midX: number;
     if (bothLeft) {
-      midX = Math.min(exitX, approachX);
+      const naturalMidX = Math.min(exitX, approachX);
+      const maxInside = fromBox && toBox
+        ? Math.min(fromBox.x, toBox.x) - 1
+        : naturalMidX + 2 * OUT;
+      midX = Math.min(maxInside, naturalMidX - sameSideDelta(t, OUT));
     } else if (bothRight) {
-      midX = Math.max(exitX, approachX);
+      const naturalMidX = Math.max(exitX, approachX);
+      const minOutside = fromBox && toBox
+        ? Math.max(fromBox.x + fromBox.width, toBox.x + toBox.width) + 1
+        : naturalMidX - 2 * OUT;
+      midX = Math.max(minOutside, naturalMidX + sameSideDelta(t, OUT));
     } else {
-      midX = (exitX + approachX) / 2;
+      midX = exitX + t * (approachX - exitX);
     }
     return dedupeConsecutivePoints([p1, { x: midX, y: p1.y }, { x: midX, y: p2.y }, p2]);
   }
@@ -121,9 +174,17 @@ export function computeStepWaypoints(
     const bothBot = s1 === 'bottom' && s2 === 'bottom';
     let midY: number;
     if (bothTop) {
-      midY = Math.min(exitY, approachY);
+      const naturalMidY = Math.min(exitY, approachY);
+      const maxInside = fromBox && toBox
+        ? Math.min(fromBox.y, toBox.y) - 1
+        : naturalMidY + 2 * OUT;
+      midY = Math.min(maxInside, naturalMidY - sameSideDelta(t, OUT));
     } else if (bothBot) {
-      midY = Math.max(exitY, approachY);
+      const naturalMidY = Math.max(exitY, approachY);
+      const minOutside = fromBox && toBox
+        ? Math.max(fromBox.y + fromBox.height, toBox.y + toBox.height) + 1
+        : naturalMidY - 2 * OUT;
+      midY = Math.max(minOutside, naturalMidY + sameSideDelta(t, OUT));
     } else if (
       fromBox && toBox &&
       ((s1 === 'top' && s2 === 'bottom') || (s1 === 'bottom' && s2 === 'top'))
@@ -132,9 +193,10 @@ export function computeStepWaypoints(
         (s1 === 'bottom' && s2 === 'top' && p1.y <= p2.y) ||
         (s1 === 'top' && s2 === 'bottom' && p1.y >= p2.y);
       if (facingVertically) {
-        midY = (p1.y + p2.y) / 2;
+        midY = p1.y + t * (p2.y - p1.y);
         return dedupeConsecutivePoints([p1, { x: p1.x, y: midY }, { x: p2.x, y: midY }, p2]);
       }
+      // Wrap-around branch: between slider not applicable; deterministic geometry.
       const laneX = laneXForOppositeVerticalSides(fromBox, toBox, p1, p2, OUT);
       const yAboveBoth = Math.min(fromBox.y, toBox.y) - OUT;
       const yBelowBoth = Math.max(fromBox.y + fromBox.height, toBox.y + toBox.height) + OUT;
@@ -157,7 +219,7 @@ export function computeStepWaypoints(
         p2,
       ]);
     } else {
-      midY = (exitY + approachY) / 2;
+      midY = exitY + t * (approachY - exitY);
     }
     return dedupeConsecutivePoints([p1, { x: p1.x, y: midY }, { x: p2.x, y: midY }, p2]);
   }
@@ -172,13 +234,17 @@ export function computeStepWaypoints(
     let outerX: number;
     if (s1 === 'right') {
       if (toBox.x > p1.x) {
-        outerX = (p1.x + OUT + toBox.x - OUT) / 2;
+        const exitX = p1.x + OUT;
+        const approachX = toBox.x - OUT;
+        outerX = exitX + t * (approachX - exitX);
       } else {
         outerX = Math.max(p1.x + OUT, toBox.x + toBox.width + OUT);
       }
     } else {
       if (toBox.x + toBox.width < p1.x) {
-        outerX = (p1.x - OUT + toBox.x + toBox.width + OUT) / 2;
+        const exitX = p1.x - OUT;
+        const approachX = toBox.x + toBox.width + OUT;
+        outerX = exitX + t * (approachX - exitX);
       } else {
         outerX = Math.min(p1.x - OUT, toBox.x - OUT);
       }
@@ -191,13 +257,17 @@ export function computeStepWaypoints(
     let outerY: number;
     if (s1 === 'bottom') {
       if (toBox.y > p1.y) {
-        outerY = (p1.y + OUT + toBox.y - OUT) / 2;
+        const exitY = p1.y + OUT;
+        const approachY = toBox.y - OUT;
+        outerY = exitY + t * (approachY - exitY);
       } else {
         outerY = Math.max(p1.y + OUT, toBox.y + toBox.height + OUT);
       }
     } else {
       if (toBox.y + toBox.height < p1.y) {
-        outerY = (p1.y - OUT + toBox.y + toBox.height + OUT) / 2;
+        const exitY = p1.y - OUT;
+        const approachY = toBox.y + toBox.height + OUT;
+        outerY = exitY + t * (approachY - exitY);
       } else {
         outerY = Math.min(p1.y - OUT, toBox.y - OUT);
       }
@@ -265,8 +335,9 @@ export function buildPath(
   radius: number,
   toBox?: Box,
   fromBox?: Box,
+  between?: number,
 ): string {
-  const waypoints = computeStepWaypoints(p1, s1, p2, s2, radius, toBox, fromBox);
+  const waypoints = computeStepWaypoints(p1, s1, p2, s2, radius, toBox, fromBox, between);
   const rEff = lineType === 'curved' ? curvedOrthoRadius(waypoints, radius) : radius;
   return roundedPath(waypoints, rEff);
 }
@@ -281,6 +352,7 @@ export function pathMidpoint(
   padding: number,
   toBox?: Box,
   fromBox?: Box,
+  between?: number,
 ): Point {
   if (lineType === 'curved') {
     const { h1, h2 } = bezierHandlesFor(p1, s1, p2, s2);
@@ -292,7 +364,7 @@ export function pathMidpoint(
       y: 0.125 * p1.y + 0.375 * c1.y + 0.375 * c2.y + 0.125 * p2.y,
     };
   }
-  const pts = computeStepWaypoints(p1, s1, p2, s2, padding, toBox, fromBox);
+  const pts = computeStepWaypoints(p1, s1, p2, s2, padding, toBox, fromBox, between);
   return waypointMidpoint(pts);
 }
 
