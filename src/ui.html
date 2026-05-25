@@ -2078,8 +2078,20 @@
           updatePresetUi();
           scheduleResize();
         } else if (msg.type === 'between-support') {
+          // Only the disabled state changed — avoid the full
+          // applyPathOffsetUi() pass which would write back to every
+          // slider's .value (and snap the one the user is actively
+          // dragging back to a sandbox echo). Toggle just the Between
+          // row's controls in place.
           betweenOffsetSupported = !!msg.supported;
-          applyPathOffsetUi();
+          const betweenSlider = $('po-between-slider');
+          const betweenReset = $('po-between-reset');
+          const betweenRow = $('po-between-row');
+          if (betweenSlider && betweenReset && betweenRow) {
+            betweenSlider.disabled = !betweenOffsetSupported;
+            betweenReset.disabled = !betweenOffsetSupported;
+            betweenRow.classList.toggle('disabled', !betweenOffsetSupported);
+          }
         } else if (msg.type === 'preset-styles') {
           savedPresetStyles = normalizePresetStyles(msg.styles || {});
           if (mode !== 'one-flow' && mode !== 'multi-flow') {

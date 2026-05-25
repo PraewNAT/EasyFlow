@@ -2,7 +2,7 @@
 // Build marker — bump on every behaviour change so the user can verify
 // Figma actually loaded the latest dist (Figma aggressively caches
 // development plugins; older bundles persist across reloads).
-console.log('[EasyFlow] build 2026-05-17-i loaded');
+console.log('[EasyFlow] build 2026-05-17-l loaded');
 
 // Safety net: any rejection that escapes a handler (e.g. a getPluginData
 // throw on a node Figma silently deleted) shouldn't crash the plugin or
@@ -500,11 +500,21 @@ async function handleUpdateAnchorOffsets(
   }
   // If start/end moved, the path may have transitioned between
   // straight ↔ bent shapes — push just the Between slider's enabled
-  // state so the panel can re-enable/disable it without disturbing
-  // the active slider drag.
+  // state. Debounce the (expensive: 2x getNodeByIdAsync per flow)
+  // recompute so a 60Hz drag doesn't thrash the node-id RPC, and so
+  // the message back doesn't disturb the slider mid-drag.
   if (sClamp !== undefined || eClamp !== undefined) {
-    void postBetweenSupportFromSelection();
+    scheduleBetweenSupportPost();
   }
+}
+
+let __betweenSupportTimer: ReturnType<typeof setTimeout> | null = null;
+function scheduleBetweenSupportPost(): void {
+  if (__betweenSupportTimer !== null) return;
+  __betweenSupportTimer = setTimeout(() => {
+    __betweenSupportTimer = null;
+    void postBetweenSupportFromSelection();
+  }, 120);
 }
 
 async function postBetweenSupportFromSelection(): Promise<void> {

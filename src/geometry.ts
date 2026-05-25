@@ -114,7 +114,19 @@ export function betweenOffsetSupported(
     }
     return true;
   }
-  // Mixed h↔v always has a corner — slidable unless we couldn't route at all.
+  // Mixed h↔v: clean-L cases have only one corner (nothing to slide). The
+  // slider is meaningful only when the routing has to detour (the Z path
+  // with two corners) — i.e. when the direction from start side to end
+  // side doesn't match the relative position of the frames.
+  if (h1) {
+    const horizontalFits = s1 === 'right' ? p2.x > p1.x : p2.x < p1.x;
+    const verticalFits = s2 === 'top' ? p1.y > p2.y : p1.y < p2.y;
+    if (horizontalFits && verticalFits) return false; // clean L
+  } else {
+    const verticalFits = s1 === 'bottom' ? p2.y > p1.y : p2.y < p1.y;
+    const horizontalFits = s2 === 'left' ? p1.x < p2.x : p1.x > p2.x;
+    if (verticalFits && horizontalFits) return false; // clean L
+  }
   return !!toBox;
   void fromBox;
 }
@@ -230,12 +242,38 @@ export function computeStepWaypoints(
     return dedupeConsecutivePoints([p1, { x: p1.x, y: p2.y }, p2]);
   }
 
+  // Clean L (2 segments, 1 corner) is the visually obvious route when the
+  // anchor sides match the relative position of the two frames — e.g.
+  // Start exits bottom and End enters left and the End frame sits
+  // diagonally below-right. Producing a Z with dogleg in those cases
+  // looks "engineered" rather than direct. We detect that case first.
+  if (h1) {
+    // H→V: s1 horizontal, s2 vertical. Clean L corner = (p2.x, p1.y).
+    const horizontalFits = s1 === 'right' ? p2.x > p1.x : p2.x < p1.x;
+    const verticalFits = s2 === 'top' ? p1.y > p2.y : p1.y < p2.y;
+    if (horizontalFits && verticalFits) {
+      return dedupeConsecutivePoints([p1, { x: p2.x, y: p1.y }, p2]);
+    }
+  } else {
+    // V→H: s1 vertical, s2 horizontal. Clean L corner = (p1.x, p2.y).
+    const verticalFits = s1 === 'bottom' ? p2.y > p1.y : p2.y < p1.y;
+    const horizontalFits = s2 === 'left' ? p1.x < p2.x : p1.x > p2.x;
+    if (verticalFits && horizontalFits) {
+      return dedupeConsecutivePoints([p1, { x: p1.x, y: p2.y }, p2]);
+    }
+  }
+
+  // For the Z-routing (overlap / detour) cases, let `t` reach the End
+  // frame's own edge instead of stopping at OUT clearance away. Keeps a
+  // visible kink (doesn't collapse to an L because outerX/outerY on the
+  // other axis still detours), but Between=1.0 now visually nests the
+  // middle bend right against the End frame.
   if (h1) {
     let outerX: number;
     if (s1 === 'right') {
       if (toBox.x > p1.x) {
         const exitX = p1.x + OUT;
-        const approachX = toBox.x - OUT;
+        const approachX = toBox.x;
         outerX = exitX + t * (approachX - exitX);
       } else {
         outerX = Math.max(p1.x + OUT, toBox.x + toBox.width + OUT);
@@ -243,7 +281,7 @@ export function computeStepWaypoints(
     } else {
       if (toBox.x + toBox.width < p1.x) {
         const exitX = p1.x - OUT;
-        const approachX = toBox.x + toBox.width + OUT;
+        const approachX = toBox.x + toBox.width;
         outerX = exitX + t * (approachX - exitX);
       } else {
         outerX = Math.min(p1.x - OUT, toBox.x - OUT);
@@ -258,7 +296,7 @@ export function computeStepWaypoints(
     if (s1 === 'bottom') {
       if (toBox.y > p1.y) {
         const exitY = p1.y + OUT;
-        const approachY = toBox.y - OUT;
+        const approachY = toBox.y;
         outerY = exitY + t * (approachY - exitY);
       } else {
         outerY = Math.max(p1.y + OUT, toBox.y + toBox.height + OUT);
@@ -266,7 +304,7 @@ export function computeStepWaypoints(
     } else {
       if (toBox.y + toBox.height < p1.y) {
         const exitY = p1.y - OUT;
-        const approachY = toBox.y + toBox.height + OUT;
+        const approachY = toBox.y + toBox.height;
         outerY = exitY + t * (approachY - exitY);
       } else {
         outerY = Math.min(p1.y - OUT, toBox.y - OUT);
