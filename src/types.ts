@@ -83,7 +83,7 @@ export type UiToPlugin =
   | { type: 'create-flow'; style: FlowStyle }
   | { type: 'update-style'; style: FlowStyle }
   | { type: 'swap-direction' }
-  | { type: 'resize-ui'; height: number }
+  | { type: 'resize-ui'; height: number; width?: number }
   | { type: 'save-preset-styles'; styles: PresetStyles }
   | {
       type: 'update-anchor-offsets';

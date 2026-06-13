@@ -2,7 +2,7 @@
 // Build marker — bump on every behaviour change so the user can verify
 // Figma actually loaded the latest dist (Figma aggressively caches
 // development plugins; older bundles persist across reloads).
-console.log('[EasyFlow] build 2026-06-14-clean-L-hv loaded');
+console.log('[EasyFlow] build 2026-06-14-resize loaded');
 
 // Safety net: any rejection that escapes a handler (e.g. a getPluginData
 // throw on a node Figma silently deleted) shouldn't crash the plugin or
@@ -238,8 +238,10 @@ figma.ui.onmessage = async (msg: UiToPlugin) => {
     }
     case 'resize-ui': {
       const h = Math.round(msg.height);
-      const clamped = Math.min(980, Math.max(260, Number.isFinite(h) ? h : 400));
-      figma.ui.resize(368, clamped);
+      const w = Math.round(msg.width ?? 368);
+      const clampedH = Math.min(1200, Math.max(260, Number.isFinite(h) ? h : 560));
+      const clampedW = Math.min(720, Math.max(320, Number.isFinite(w) ? w : 368));
+      figma.ui.resize(clampedW, clampedH);
       break;
     }
   }

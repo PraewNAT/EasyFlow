@@ -33,6 +33,41 @@
           Roboto, sans-serif;
         font-size: 12px;
       }
+      /* Once the user has dragged the resize handle, the panel is sized
+         manually and may be smaller than its content — let the body scroll
+         instead of clipping the bottom sections. Auto-fit mode hides the
+         scrollbar entirely. */
+      html { overflow-x: hidden; overflow-y: hidden; }
+      html.user-resized { overflow-y: auto; }
+      /* Resize grip — fixed bottom-right corner. Two diagonal slashes hint
+         at the drag direction; matches the OS convention. */
+      .resize-handle {
+        position: fixed;
+        right: 0;
+        bottom: 0;
+        width: 16px;
+        height: 16px;
+        cursor: nwse-resize;
+        z-index: 9999;
+        opacity: 0.45;
+        transition: opacity 120ms ease;
+      }
+      .resize-handle:hover { opacity: 0.9; }
+      .resize-handle::before,
+      .resize-handle::after {
+        content: '';
+        position: absolute;
+        right: 3px;
+        background: var(--text);
+        height: 1.5px;
+        transform-origin: right center;
+      }
+      .resize-handle::before { bottom: 4px; width: 9px; transform: rotate(-45deg); }
+      .resize-handle::after  { bottom: 8px; width: 5px; transform: rotate(-45deg); }
+      /* While resizing, disable selection and force the resize cursor
+         globally so the cursor doesn't flicker over text/buttons. */
+      html.resizing,
+      html.resizing * { cursor: nwse-resize !important; user-select: none !important; }
 
       .toggle-header {
         display: flex;
@@ -898,6 +933,8 @@
   </head>
 
   <body>
+    <!-- Drag-to-resize grip (fixed bottom-right) -->
+    <div class="resize-handle" id="resize-handle" title="Drag to resize"></div>
     <!-- Toggle -->
     <section class="section toggle-section">
       <div class="toggle-header">
@@ -1573,11 +1610,15 @@
        *  shrinking when accordions collapse. */
       let __resizeRaf = null;
       function scheduleResize() {
+        // Once the user takes manual control via the resize grip, auto-fit
+        // shouldn't fight back on every accordion toggle / selection change.
+        if (userHasResized) return;
         if (__resizeRaf != null) cancelAnimationFrame(__resizeRaf);
         __resizeRaf = requestAnimationFrame(() => {
           __resizeRaf = null;
           let bottom = 0;
           for (const el of document.body.children) {
+            if (el.id === 'resize-handle') continue;
             if (el.offsetParent === null && getComputedStyle(el).position !== 'fixed') continue;
             const rect = el.getBoundingClientRect();
             if (rect.bottom > bottom) bottom = rect.bottom;
@@ -1586,6 +1627,89 @@
           post({ type: 'resize-ui', height: h });
         });
       }
+
+      // -----------------------------------------------------------------
+      // Drag-to-resize (bottom-right grip)
+      // -----------------------------------------------------------------
+      // Bounds mirror the sandbox clamp in code.ts. Keep them in sync.
+      const MIN_W = 320, MAX_W = 720;
+      const MIN_H = 260, MAX_H = 1200;
+      const SIZE_KEY_W = 'easyflow.size.w';
+      const SIZE_KEY_H = 'easyflow.size.h';
+      let userHasResized = false;
+
+      function readSavedSize() {
+        try {
+          const w = parseInt(localStorage.getItem(SIZE_KEY_W) || '', 10);
+          const h = parseInt(localStorage.getItem(SIZE_KEY_H) || '', 10);
+          if (Number.isFinite(w) && Number.isFinite(h)) return { w, h };
+        } catch (_) {}
+        return null;
+      }
+      function saveSize(w, h) {
+        try {
+          localStorage.setItem(SIZE_KEY_W, String(w));
+          localStorage.setItem(SIZE_KEY_H, String(h));
+        } catch (_) {}
+      }
+      function applySavedSizeIfAny() {
+        const saved = readSavedSize();
+        if (!saved) return false;
+        userHasResized = true;
+        document.documentElement.classList.add('user-resized');
+        post({ type: 'resize-ui', width: saved.w, height: saved.h });
+        return true;
+      }
+
+      (function initResizeHandle() {
+        const grip = document.getElementById('resize-handle');
+        if (!grip) return;
+        let startX = 0, startY = 0, startW = 0, startH = 0;
+        let curW = 0, curH = 0;
+        let dragRaf = null;
+        let dragging = false;
+
+        function flushDrag() {
+          dragRaf = null;
+          post({ type: 'resize-ui', width: curW, height: curH });
+        }
+        function onMove(e) {
+          if (!dragging) return;
+          const dx = e.clientX - startX;
+          const dy = e.clientY - startY;
+          curW = Math.min(MAX_W, Math.max(MIN_W, Math.round(startW + dx)));
+          curH = Math.min(MAX_H, Math.max(MIN_H, Math.round(startH + dy)));
+          if (dragRaf == null) dragRaf = requestAnimationFrame(flushDrag);
+        }
+        function onUp() {
+          if (!dragging) return;
+          dragging = false;
+          document.documentElement.classList.remove('resizing');
+          window.removeEventListener('mousemove', onMove);
+          window.removeEventListener('mouseup', onUp);
+          if (dragRaf != null) { cancelAnimationFrame(dragRaf); dragRaf = null; }
+          saveSize(curW, curH);
+        }
+        grip.addEventListener('mousedown', (e) => {
+          e.preventDefault();
+          dragging = true;
+          startX = e.clientX;
+          startY = e.clientY;
+          // window.innerWidth/Height reflects the current iframe size, which
+          // is what Figma resized us to last — perfect baseline for the drag.
+          startW = window.innerWidth;
+          startH = window.innerHeight;
+          curW = startW;
+          curH = startH;
+          if (!userHasResized) {
+            userHasResized = true;
+            document.documentElement.classList.add('user-resized');
+          }
+          document.documentElement.classList.add('resizing');
+          window.addEventListener('mousemove', onMove);
+          window.addEventListener('mouseup', onUp);
+        });
+      })();
 
       // Coalesce rapid input events (keystrokes, slider drags, color picker)
       // into one message per animation frame. Without this, dragging a slider
@@ -2136,11 +2260,15 @@
       initAccordions();
       renderPresets();
       applyStateToUi();
+      // Restore the user's last manual size if they previously dragged the
+      // grip — this also sets userHasResized so scheduleResize() bails out
+      // and the auto-fit ResizeObserver doesn't fight the restored size.
+      const hadSavedSize = applySavedSizeIfAny();
       try {
         new ResizeObserver(() => scheduleResize()).observe(document.documentElement);
       } catch (_) {}
       post({ type: 'ui-ready' });
-      scheduleResize();
+      if (!hadSavedSize) scheduleResize();
     </script>
   </body>
 </html>
