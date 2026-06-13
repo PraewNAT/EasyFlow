@@ -337,32 +337,6 @@ export function roundedPath(points: Point[], radius: number): string {
 }
 
 // ---------------------------------------------------------------------------
-// "Curved" line type — same orthogonal spine as step, with larger corner radii (soft elbows), not one cubic Bézier.
-// ---------------------------------------------------------------------------
-
-/**
- * Boost corner rounding for curved flows.
- * roundedPath clamps each weld with min(R, adjacent/2) — pick R near the geometric ceiling (~½ of the
- * shortest segment) plus a generous floor so long spans read very soft (“green line”).
- */
-export function curvedOrthoRadius(waypoints: Point[], baseRadius: number): number {
-  const floor = Math.max(baseRadius * 16, 200);
-  if (waypoints.length < 3) return floor;
-
-  let minLeg = Infinity;
-  for (let i = 1; i < waypoints.length; i++) {
-    const a = waypoints[i - 1];
-    const b = waypoints[i];
-    minLeg = Math.min(minLeg, Math.hypot(b.x - a.x, b.y - a.y));
-  }
-  if (!Number.isFinite(minLeg) || minLeg <= 0) return floor;
-
-  // As high as orthogonal fillets allow before roundedPath clamps (≈ half the shortest waypoint leg).
-  const nearGeomMax = Math.max(0, minLeg * 0.497 - 0.75);
-  return Math.min(1_500_000, Math.max(floor, nearGeomMax));
-}
-
-// ---------------------------------------------------------------------------
 // Main entry point used by code.ts
 // ---------------------------------------------------------------------------
 
@@ -375,9 +349,16 @@ export function buildPath(
   fromBox?: Box,
   between?: number,
 ): string {
+  if (lineType === 'curved') {
+    // True cubic Bézier — matches the modern vector renderer in code.ts so
+    // legacy frame-based flows produce the same smooth curve as new ones.
+    const { h1, h2 } = bezierHandlesFor(p1, s1, p2, s2);
+    const c1x = p1.x + h1.x, c1y = p1.y + h1.y;
+    const c2x = p2.x + h2.x, c2y = p2.y + h2.y;
+    return `M ${fmt(p1.x)} ${fmt(p1.y)} C ${fmt(c1x)} ${fmt(c1y)} ${fmt(c2x)} ${fmt(c2y)} ${fmt(p2.x)} ${fmt(p2.y)}`;
+  }
   const waypoints = computeStepWaypoints(p1, s1, p2, s2, radius, toBox, fromBox, between);
-  const rEff = lineType === 'curved' ? curvedOrthoRadius(waypoints, radius) : radius;
-  return roundedPath(waypoints, rEff);
+  return roundedPath(waypoints, radius);
 }
 
 // The midpoint ALONG the actual path (not the geometric center of p1–p2).
@@ -416,6 +397,12 @@ export function pathMidpoint(
  * Compute control-point offset vectors for a cubic Bézier connecting (p1, s1)
  * to (p2, s2). Handles are returned RELATIVE to their endpoints (Figma's
  * VectorSegment.tangentStart / tangentEnd convention).
+ *
+ * Handle length follows the ReactFlow/n8n/FigJam convention: each handle is
+ * proportional to its endpoint's projected distance toward the other endpoint,
+ * capped at half the straight-line span. The cap prevents the two control
+ * points from crossing past each other, which is what produced the
+ * S-overshoot in earlier revisions.
  */
 export function bezierHandlesFor(
   p1: Point, s1: Side,
@@ -425,17 +412,15 @@ export function bezierHandlesFor(
   const n2 = sideDirection(s2);
   const dx = p2.x - p1.x;
   const dy = p2.y - p1.y;
-  // Distance projected along each normal — keeps the handle long enough to
-  // bend smoothly even when frames are vertically aligned but horizontally far
-  // (or vice versa).
   const projected1 = Math.abs(n1.x * dx + n1.y * dy);
   const projected2 = Math.abs(n2.x * dx + n2.y * dy);
   const span = Math.hypot(dx, dy);
-  // Magnitude: at least 60px so short connectors still curve, capped to half
-  // the gap so handles don't overshoot. Using max(projected, 0.5·span) lets
-  // perpendicular layouts still get a soft bow.
-  const mag1 = Math.max(60, Math.min(projected1 * 0.5 + span * 0.25, span * 0.6));
-  const mag2 = Math.max(60, Math.min(projected2 * 0.5 + span * 0.25, span * 0.6));
+  // Half-span cap is the no-overshoot bound: when both handles equal 0.5·span
+  // they meet exactly in the middle, producing a clean C/S curve with a single
+  // graceful bend. 40px floor keeps very short connectors visibly curved.
+  const halfSpan = span * 0.5;
+  const mag1 = Math.max(40, Math.min(projected1 * 0.5, halfSpan));
+  const mag2 = Math.max(40, Math.min(projected2 * 0.5, halfSpan));
   return {
     h1: { x: n1.x * mag1, y: n1.y * mag1 },
     h2: { x: n2.x * mag2, y: n2.y * mag2 },
