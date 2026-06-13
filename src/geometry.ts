@@ -119,8 +119,13 @@ export function betweenOffsetSupported(
   // with two corners) — i.e. when the direction from start side to end
   // side doesn't match the relative position of the frames.
   if (h1) {
+    // H→V clean L corner = (p2.x, p1.y).
+    //   Segment 1 (horizontal): exits along s1 → s1='right' needs p2.x > p1.x.
+    //   Segment 2 (vertical):   approaches p2 from the s2 edge — to enter
+    //     from 'top' the segment must descend (p1.y < p2.y); to enter from
+    //     'bottom' it must ascend (p1.y > p2.y).
     const horizontalFits = s1 === 'right' ? p2.x > p1.x : p2.x < p1.x;
-    const verticalFits = s2 === 'top' ? p1.y > p2.y : p1.y < p2.y;
+    const verticalFits = s2 === 'top' ? p1.y < p2.y : p1.y > p2.y;
     if (horizontalFits && verticalFits) return false; // clean L
   } else {
     const verticalFits = s1 === 'bottom' ? p2.y > p1.y : p2.y < p1.y;
@@ -249,8 +254,12 @@ export function computeStepWaypoints(
   // looks "engineered" rather than direct. We detect that case first.
   if (h1) {
     // H→V: s1 horizontal, s2 vertical. Clean L corner = (p2.x, p1.y).
+    //   Segment 1 exits along s1 → horizontalFits checks the dst is on
+    //   that side. Segment 2 approaches p2 from the s2 edge — entering
+    //   from 'top' needs the segment to descend (p1.y < p2.y), entering
+    //   from 'bottom' needs it to ascend (p1.y > p2.y).
     const horizontalFits = s1 === 'right' ? p2.x > p1.x : p2.x < p1.x;
-    const verticalFits = s2 === 'top' ? p1.y > p2.y : p1.y < p2.y;
+    const verticalFits = s2 === 'top' ? p1.y < p2.y : p1.y > p2.y;
     if (horizontalFits && verticalFits) {
       return dedupeConsecutivePoints([p1, { x: p2.x, y: p1.y }, p2]);
     }
