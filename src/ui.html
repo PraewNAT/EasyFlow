@@ -39,31 +39,32 @@
          scrollbar entirely. */
       html { overflow-x: hidden; overflow-y: hidden; }
       html.user-resized { overflow-y: auto; }
-      /* Resize grip — fixed bottom-right corner. Two diagonal slashes hint
-         at the drag direction; matches the OS convention. */
+      /* Resize grip — fixed bottom-right corner. Three diagonal slashes
+         (macOS / Windows convention) so it's immediately recognizable. */
       .resize-handle {
         position: fixed;
         right: 0;
         bottom: 0;
-        width: 16px;
-        height: 16px;
+        width: 22px;
+        height: 22px;
         cursor: nwse-resize;
         z-index: 9999;
-        opacity: 0.45;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        color: var(--text);
+        background: transparent;
+        border-radius: 4px 0 0 0;
+        transition: background 120ms ease, color 120ms ease;
+      }
+      .resize-handle svg {
+        opacity: 0.75;
         transition: opacity 120ms ease;
       }
-      .resize-handle:hover { opacity: 0.9; }
-      .resize-handle::before,
-      .resize-handle::after {
-        content: '';
-        position: absolute;
-        right: 3px;
-        background: var(--text);
-        height: 1.5px;
-        transform-origin: right center;
+      .resize-handle:hover {
+        background: var(--surface-2);
       }
-      .resize-handle::before { bottom: 4px; width: 9px; transform: rotate(-45deg); }
-      .resize-handle::after  { bottom: 8px; width: 5px; transform: rotate(-45deg); }
+      .resize-handle:hover svg { opacity: 1; }
       /* While resizing, disable selection and force the resize cursor
          globally so the cursor doesn't flicker over text/buttons. */
       html.resizing,
@@ -934,7 +935,13 @@
 
   <body>
     <!-- Drag-to-resize grip (fixed bottom-right) -->
-    <div class="resize-handle" id="resize-handle" title="Drag to resize"></div>
+    <div class="resize-handle" id="resize-handle" title="Drag to resize">
+      <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round">
+        <line x1="13" y1="3"  x2="3"  y2="13" />
+        <line x1="13" y1="7"  x2="7"  y2="13" />
+        <line x1="13" y1="11" x2="11" y2="13" />
+      </svg>
+    </div>
     <!-- Toggle -->
     <section class="section toggle-section">
       <div class="toggle-header">
