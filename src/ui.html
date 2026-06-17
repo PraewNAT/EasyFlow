@@ -1528,23 +1528,19 @@
         const p = savedPresetStyles[name];
         if (!p) return;
         activePreset = name;
+        // A preset is a visual style template (color, width, line type,
+        // arrows, label) — NOT routing. The user-aimed anchor sides and
+        // per-edge offsets describe where the line attaches to its frames,
+        // and switching the look of the line shouldn't reposition it.
+        // Preserve those fields across the swap.
+        const prevStartAnchor = state.startAnchor;
+        const prevEndAnchor = state.endAnchor;
         state = cloneStyle(p);
-        // Apply preset = full reset including path offsets. Without this the
-        // previously-dragged offsets carry over and the connector visibly
-        // sits off-center even though the user "reset" via preset.
-        startOffsetValue = 0.5;
-        endOffsetValue = 0.5;
-        clearStartMixed();
-        clearEndMixed();
+        state.startAnchor = prevStartAnchor;
+        state.endAnchor = prevEndAnchor;
         applyStateToUi();
         updatePresetUi();
         emit();
-        // Push offset reset to selected flow(s) so meta updates and the
-        // connector geometry returns to center. No-op when no flow is
-        // selected (sandbox just skips).
-        if (mode === 'one-flow' || mode === 'multi-flow') {
-          post({ type: 'update-anchor-offsets', startOffset: 0.5, endOffset: 0.5 });
-        }
       }
 
       function deletePreset(name) {
