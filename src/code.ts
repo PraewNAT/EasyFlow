@@ -2,7 +2,7 @@
 // Build marker — bump on every behaviour change so the user can verify
 // Figma actually loaded the latest dist (Figma aggressively caches
 // development plugins; older bundles persist across reloads).
-console.log('[EasyFlow] build 2026-06-17-heal loaded');
+console.log('[EasyFlow] build 2026-06-17-no-square loaded');
 
 // Safety net: any rejection that escapes a handler (e.g. a getPluginData
 // throw on a node Figma silently deleted) shouldn't crash the plugin or
@@ -636,8 +636,6 @@ function arrowTypeToStrokeCap(t: ArrowType): StrokeCap {
       return 'CIRCLE_FILLED';
     case 'diamond':
       return 'DIAMOND_FILLED';
-    case 'square':
-      return 'ARROW_LINES';
     default:
       return 'NONE';
   }
@@ -1077,7 +1075,6 @@ function buildArrowHead(
     case 'arrow':   return triangleArrow(point, dir, size, paint);
     case 'circle':  return shapeAt('ELLIPSE', point, size, paint);
     case 'diamond': return diamondAt(point, size, paint);
-    case 'square':  return shapeAt('RECT', point, size, paint);
   }
 }
 
