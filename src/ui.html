@@ -33,12 +33,13 @@
           Roboto, sans-serif;
         font-size: 12px;
       }
-      /* Once the user has dragged the resize handle, the panel is sized
-         manually and may be smaller than its content — let the body scroll
-         instead of clipping the bottom sections. Auto-fit mode hides the
-         scrollbar entirely. */
-      html { overflow-x: hidden; overflow-y: hidden; }
-      html.user-resized { overflow-y: auto; }
+      /* html needs an explicit height so its overflow-y: auto can produce a
+         scrollbar — without height:100% it just grows to fit body content
+         and the overflow rule is a no-op. In auto-fit mode the sandbox
+         resizes the window to match the body, so there's nothing to scroll
+         and the scrollbar stays hidden; once the user drags smaller than
+         content, the scrollbar appears. */
+      html { height: 100%; overflow-x: hidden; overflow-y: auto; }
       /* Resize grip — fixed bottom-right corner. Three diagonal slashes
          (macOS / Windows convention) so it's immediately recognizable. */
       .resize-handle {
@@ -1663,7 +1664,6 @@
         const saved = readSavedSize();
         if (!saved) return false;
         userHasResized = true;
-        document.documentElement.classList.add('user-resized');
         post({ type: 'resize-ui', width: saved.w, height: saved.h });
         return true;
       }
@@ -1708,10 +1708,7 @@
           startH = window.innerHeight;
           curW = startW;
           curH = startH;
-          if (!userHasResized) {
-            userHasResized = true;
-            document.documentElement.classList.add('user-resized');
-          }
+          userHasResized = true;
           document.documentElement.classList.add('resizing');
           window.addEventListener('mousemove', onMove);
           window.addEventListener('mouseup', onUp);
