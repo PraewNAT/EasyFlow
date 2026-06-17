@@ -1585,7 +1585,14 @@
         fresh.label = Object.assign({}, DEFAULTS.label, { text: '' });
         savedPresetStyles[name] = fresh;
         activePreset = name;
+        // Preserve the user's current anchor selections — the new preset is
+        // a style template; the routing they've aimed shouldn't snap back
+        // to 'auto' just because they added a new color swatch.
+        const prevStartAnchor = state.startAnchor;
+        const prevEndAnchor = state.endAnchor;
         state = cloneStyle(fresh);
+        state.startAnchor = prevStartAnchor;
+        state.endAnchor = prevEndAnchor;
         applyStateToUi();
         hideAddPresetInput();
         renderPresets();
