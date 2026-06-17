@@ -2,7 +2,7 @@
 // Build marker — bump on every behaviour change so the user can verify
 // Figma actually loaded the latest dist (Figma aggressively caches
 // development plugins; older bundles persist across reloads).
-console.log('[EasyFlow] build 2026-06-14-resize loaded');
+console.log('[EasyFlow] build 2026-06-17-heal loaded');
 
 // Safety net: any rejection that escapes a handler (e.g. a getPluginData
 // throw on a node Figma silently deleted) shouldn't crash the plugin or
@@ -735,14 +735,30 @@ async function renderFlow(node: SceneNode, meta: FlowMeta): Promise<void> {
 }
 
 async function renderVectorFlow(vec: VectorNode, meta: FlowMeta): Promise<void> {
-  const fromNode = await figma.getNodeByIdAsync(meta.fromNodeId) as SceneNode | null;
-  const toNode = await figma.getNodeByIdAsync(meta.toNodeId) as SceneNode | null;
+  let fromNode = await figma.getNodeByIdAsync(meta.fromNodeId) as SceneNode | null;
+  let toNode = await figma.getNodeByIdAsync(meta.toNodeId) as SceneNode | null;
   if (!fromNode || !toNode || fromNode.removed || toNode.removed) {
-    await removeFlowLabel(meta, vec.id);
-    unindexFlow(vec.id);
-    lastRenderHash.delete(vec.id);
-    vec.remove();
-    return;
+    // Try spatial heal — common after a cross-file copy/paste, where the
+    // pasted vec retains the OLD endpoint ids (which don't exist in the
+    // new file). The vec's geometry is preserved by Figma, so the first
+    // and last vertex still sit exactly on the source/target frame edges
+    // — we just need to find which frames in this page they belong to.
+    const healed = await healOrphanedFlow(vec);
+    if (healed) {
+      unindexFlow(vec.id);
+      meta = { ...meta, fromNodeId: healed.fromNodeId, toNodeId: healed.toNodeId };
+      writeMeta(vec, meta);
+      indexFlowEndpoints(vec.id, meta.fromNodeId, meta.toNodeId);
+      fromNode = await figma.getNodeByIdAsync(meta.fromNodeId) as SceneNode | null;
+      toNode = await figma.getNodeByIdAsync(meta.toNodeId) as SceneNode | null;
+    }
+    if (!fromNode || !toNode || fromNode.removed || toNode.removed) {
+      await removeFlowLabel(meta, vec.id);
+      unindexFlow(vec.id);
+      lastRenderHash.delete(vec.id);
+      vec.remove();
+      return;
+    }
   }
 
   const fromBox = absoluteBox(fromNode);
@@ -1185,6 +1201,100 @@ function absoluteBox(node: SceneNode): Box {
   const b = node.absoluteBoundingBox;
   if (b) return { x: b.x, y: b.y, width: b.width, height: b.height };
   return { x: node.x, y: node.y, width: node.width, height: node.height };
+}
+
+/**
+ * Heuristic re-linker for orphaned flow vectors (typically post copy-paste
+ * across files): the saved fromNodeId/toNodeId no longer resolve, but the
+ * pasted vec retains its geometry. We read the first and last vertex of
+ * its vector network, project to absolute coords, and look for frames
+ * on the current page whose border passes through those points.
+ *
+ * Returns the resolved {fromNodeId, toNodeId} on success, or null if
+ * either endpoint can't be confidently matched (no nearby frame, or both
+ * endpoints would resolve to the same node).
+ */
+async function healOrphanedFlow(
+  vec: VectorNode,
+): Promise<{ fromNodeId: string; toNodeId: string } | null> {
+  try {
+    const net = vec.vectorNetwork;
+    const verts = net?.vertices;
+    if (!verts || verts.length < 2) return null;
+    const first = verts[0];
+    const last = verts[verts.length - 1];
+    // Modern vec renderer sets vec.x/y to minX/minY of its waypoints and
+    // stores vertices in that local space — so absolute = vec.x + rx.
+    const pStart = { x: vec.x + first.x, y: vec.y + first.y };
+    const pEnd = { x: vec.x + last.x, y: vec.y + last.y };
+    // Frame edges snap to integer (or sub-pixel) coordinates; this tolerance
+    // only needs to absorb floating-point rounding from setVectorNetworkAsync.
+    const TOL = 2;
+
+    let bestStart: { id: string; dist: number; area: number } | null = null;
+    let bestEnd: { id: string; dist: number; area: number } | null = null;
+
+    const stack: SceneNode[] = [...figma.currentPage.children];
+    while (stack.length) {
+      const node = stack.pop()!;
+      if (node.id === vec.id) continue;
+      // Recurse into containers regardless of connectability — a frame's
+      // children may be the actual target rectangles.
+      if ('children' in node && node.children) {
+        for (const c of node.children) stack.push(c);
+      }
+      if (!isConnectableNode(node)) continue;
+      const b = node.absoluteBoundingBox;
+      if (!b) continue;
+      const area = b.width * b.height;
+      const dStart = distanceToRectBoundary(b, pStart);
+      if (dStart <= TOL) {
+        // Prefer closer match, then smaller area (more specific frame).
+        if (!bestStart || dStart < bestStart.dist
+            || (dStart === bestStart.dist && area < bestStart.area)) {
+          bestStart = { id: node.id, dist: dStart, area };
+        }
+      }
+      const dEnd = distanceToRectBoundary(b, pEnd);
+      if (dEnd <= TOL) {
+        if (!bestEnd || dEnd < bestEnd.dist
+            || (dEnd === bestEnd.dist && area < bestEnd.area)) {
+          bestEnd = { id: node.id, dist: dEnd, area };
+        }
+      }
+    }
+    if (!bestStart || !bestEnd) return null;
+    if (bestStart.id === bestEnd.id) return null;
+    return { fromNodeId: bestStart.id, toNodeId: bestEnd.id };
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Minimum perpendicular distance from point p to the rectangle's border
+ * (any of its four edges). Returns Infinity if p doesn't sit within any
+ * edge's parallel span — i.e. it isn't aligned to any single edge, so
+ * snapping wouldn't have placed it there.
+ */
+function distanceToRectBoundary(
+  b: { x: number; y: number; width: number; height: number },
+  p: { x: number; y: number },
+): number {
+  const left = b.x;
+  const right = b.x + b.width;
+  const top = b.y;
+  const bottom = b.y + b.height;
+  let min = Infinity;
+  // Left / right edges run vertically: p must fall within the vertical span.
+  if (p.y >= top - 0.01 && p.y <= bottom + 0.01) {
+    min = Math.min(min, Math.abs(p.x - left), Math.abs(p.x - right));
+  }
+  // Top / bottom edges run horizontally: p must fall within the horizontal span.
+  if (p.x >= left - 0.01 && p.x <= right + 0.01) {
+    min = Math.min(min, Math.abs(p.y - top), Math.abs(p.y - bottom));
+  }
+  return min;
 }
 
 function readMeta(node: BaseNode): FlowMeta | null {
