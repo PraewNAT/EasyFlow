@@ -2,7 +2,7 @@
 // Build marker — bump on every behaviour change so the user can verify
 // Figma actually loaded the latest dist (Figma aggressively caches
 // development plugins; older bundles persist across reloads).
-console.log('[EasyFlow] build 2026-06-21-ancestor-index-3 loaded');
+console.log('[EasyFlow] build 2026-06-21-keep-orphans loaded');
 
 // Safety net: any rejection that escapes a handler (e.g. a getPluginData
 // throw on a node Figma silently deleted) shouldn't crash the plugin or
@@ -788,10 +788,13 @@ async function renderVectorFlow(vec: VectorNode, meta: FlowMeta): Promise<void> 
       toNode = await figma.getNodeByIdAsync(meta.toNodeId) as SceneNode | null;
     }
     if (!fromNode || !toNode || fromNode.removed || toNode.removed) {
-      await removeFlowLabel(meta, vec.id);
+      // Heal failed (endpoint frame deleted, or pasted into a file with no
+      // matching frame). Per user preference, DON'T delete the flow — leave
+      // it and its label in place as a static dangling line so nothing the
+      // user drew silently disappears. Just stop tracking it; the next plugin
+      // open re-attempts heal (bootstrap re-indexes it, deep pass retries),
+      // so it reconnects automatically if the missing frame comes back.
       unindexFlow(vec.id);
-      lastRenderHash.delete(vec.id);
-      vec.remove();
       return;
     }
   }
@@ -910,9 +913,9 @@ async function renderLegacyFrameFlow(wrapper: FrameNode, meta: FlowMeta): Promis
       toNode = await figma.getNodeByIdAsync(meta.toNodeId) as SceneNode | null;
     }
     if (!fromNode || !toNode || fromNode.removed || toNode.removed) {
+      // Heal failed — leave the flow in place rather than deleting it (same
+      // policy as the vector path: never silently remove what the user drew).
       unindexFlow(wrapper.id);
-      lastRenderHash.delete(wrapper.id);
-      wrapper.remove();
       return;
     }
   }
