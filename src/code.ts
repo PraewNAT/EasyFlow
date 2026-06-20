@@ -2,7 +2,7 @@
 // Build marker — bump on every behaviour change so the user can verify
 // Figma actually loaded the latest dist (Figma aggressively caches
 // development plugins; older bundles persist across reloads).
-console.log('[EasyFlow] build 2026-06-21-frame-uuid-relink loaded');
+console.log('[EasyFlow] build 2026-06-21-ancestor-index-3 loaded');
 
 // Safety net: any rejection that escapes a handler (e.g. a getPluginData
 // throw on a node Figma silently deleted) shouldn't crash the plugin or
@@ -78,13 +78,33 @@ let lastSelectionIds: string[] = figma.currentPage.selection.map((n) => n.id);
 // uses them) because esbuild's IIFE bundle would otherwise hit them
 // while still in their temporal dead zone and throw
 // "cannot read property 'clear' of undefined".
-//   endpointToFlows: endpoint node id → set of flow ids that use it
-//   flowToEndpoints: flow id → its two endpoint ids (O(1) delete unindex)
+//   endpointToFlows: node id → set of flow ids whose rerender it should
+//     trigger. Keyed not just by the two endpoint nodes but by every
+//     ANCESTOR of each endpoint up to the page — because Figma fires
+//     documentchange only on the node that actually moved, so dragging a
+//     screen that *contains* an endpoint (e.g. an element nested inside a
+//     component instance) reports the screen, never the buried endpoint.
+//     Indexing ancestors lets that move still find and rerender the flow.
+//   flowToEndpoints: flow id → its two true endpoint ids (for the catch-up
+//     rerender after loadAllPagesAsync; not the ancestor set)
+//   flowToIndexedIds: flow id → every id it's registered under in
+//     endpointToFlows (endpoints + ancestors), so unindex can remove them all
 //   flowToLabel / labelToFlow: bidirectional flow ↔ label-node link
+//   lastRenderHash: flow id → hash of the inputs of its last successful
+//     render. Lives up here too because unindexFlow clears it, and the
+//     bootstrap below now reaches unindexFlow (via setFlowIndex) at
+//     module-eval time — so it must already exist or we hit the same TDZ.
 const endpointToFlows = new Map<string, Set<string>>();
 const flowToEndpoints = new Map<string, [string, string]>();
+const flowToIndexedIds = new Map<string, Set<string>>();
 const flowToLabel = new Map<string, string>();
 const labelToFlow = new Map<string, string>();
+// Hash of the inputs that produced the last successful render, per flow id.
+// Lets renderFlow short-circuit when nothing visible would change — saves the
+// setVectorNetworkAsync / font-load cycle on redundant style updates, slider
+// drags that release on the same value, and documentchange events that touch
+// unrelated properties on tracked endpoints.
+const lastRenderHash = new Map<string, string>();
 
 // Register selection / page handlers synchronously — both work in
 // dynamic-page mode without loadAllPagesAsync.
@@ -99,6 +119,10 @@ bootstrapEndpointIndexForCurrentPage();
 // document load so frame moves rerender flows. Runs in the background so
 // the plugin UI is interactive immediately.
 maybeEnableDocChangeForCurrentPage();
+// Deep pass (async, off the instant-open path): index flows the shallow scan
+// missed (nested in a section/frame, or pasted) and heal any orphans now, so
+// frames moved before the user touches each flow still drag their lines.
+void reindexAndHealAllFlows().then(maybeEnableDocChangeForCurrentPage);
 
 // Load persisted preset styles and notify UI when ready.
 const SAVED_PRESET_STYLES_KEY = 'easyflow.presetStyles';
@@ -148,6 +172,9 @@ function maybeEnableDocChangeForCurrentPage(): void {
 async function onCurrentPageChangedAsync(): Promise<void> {
   bootstrapEndpointIndexForCurrentPage();
   maybeEnableDocChangeForCurrentPage();
+  // Same deep index + orphan heal as on open — the new page may hold nested
+  // or pasted flows the shallow scan can't see.
+  void reindexAndHealAllFlows().then(maybeEnableDocChangeForCurrentPage);
   await syncUi();
 }
 
@@ -563,12 +590,8 @@ async function postBetweenSupportFromSelection(): Promise<void> {
 
 const renderInFlight = new Set<string>();
 const renderPending = new Map<string, FlowMeta>();
-// Hash of the inputs that produced the last successful render, per flow id.
-// Lets renderFlow short-circuit when nothing visible would change — saves the
-// setVectorNetworkAsync / font-load cycle on redundant style updates, slider
-// drags that release on the same value, and documentchange events that touch
-// unrelated properties on tracked endpoints.
-const lastRenderHash = new Map<string, string>();
+// (lastRenderHash is declared with the reverse indices near the top — it has
+// to exist before the synchronous bootstrap call, which now reaches it.)
 function renderInputHash(meta: FlowMeta, fromBox: Box, toBox: Box): string {
   return JSON.stringify([
     meta.strokeColor, meta.opacity, meta.strokeWidth, meta.strokeStyle,
@@ -783,6 +806,9 @@ async function renderVectorFlow(vec: VectorNode, meta: FlowMeta): Promise<void> 
     meta = { ...meta, fromFrameUuid: fromUuid, toFrameUuid: toUuid };
     writeMeta(vec, meta);
   }
+  // Re-index under endpoints + ancestor chains (handles re-parenting and
+  // endpoints buried in component instances — see indexFlowWithAncestors).
+  indexFlowWithAncestors(vec.id, fromNode, toNode);
 
   const fromBox = absoluteBox(fromNode);
   const toBox = absoluteBox(toNode);
@@ -898,6 +924,7 @@ async function renderLegacyFrameFlow(wrapper: FrameNode, meta: FlowMeta): Promis
     meta = { ...meta, fromFrameUuid: fromUuid, toFrameUuid: toUuid };
     writeMeta(wrapper, meta);
   }
+  indexFlowWithAncestors(wrapper.id, fromNode, toNode);
 
   const fromBox = absoluteBox(fromNode);
   const toBox = absoluteBox(toNode);
@@ -1025,23 +1052,59 @@ function scheduleFlowRerenderForMovedEndpoints(): void {
   }, 12);
 }
 
-function indexFlowEndpoints(flowId: string, fromId: string, toId: string): void {
+/** Register `flowId` under each id in `indexIds`, recording the full set so
+ *  unindex can undo it. `from`/`to` are the true endpoints (kept separately
+ *  for the post-load catch-up). Idempotent: clears the flow's prior entries
+ *  first, so re-indexing after a re-parent leaves no stale ancestor links. */
+function setFlowIndex(flowId: string, fromId: string, toId: string, indexIds: Set<string>): void {
+  unindexFlow(flowId);
   flowToEndpoints.set(flowId, [fromId, toId]);
-  for (const epId of [fromId, toId]) {
-    let s = endpointToFlows.get(epId);
-    if (!s) { s = new Set(); endpointToFlows.set(epId, s); }
+  flowToIndexedIds.set(flowId, indexIds);
+  for (const id of indexIds) {
+    let s = endpointToFlows.get(id);
+    if (!s) { s = new Set(); endpointToFlows.set(id, s); }
     s.add(flowId);
   }
 }
 
+/** Cheap, id-only indexing for the sync bootstrap and the orphan path, where
+ *  we only have ids from meta (no live nodes to walk ancestors from). The
+ *  deep pass / render upgrades these to ancestor-aware entries later. */
+function indexFlowEndpoints(flowId: string, fromId: string, toId: string): void {
+  setFlowIndex(flowId, fromId, toId, new Set([fromId, toId]));
+}
+
+/** Every id from `node` up to (not including) the page — the chain of nodes
+ *  whose movement shifts `node`'s absolute position. */
+function ancestorChainIds(node: BaseNode): string[] {
+  const ids: string[] = [];
+  let cur: BaseNode | null = node;
+  while (cur && cur.type !== 'PAGE' && cur.type !== 'DOCUMENT') {
+    ids.push(cur.id);
+    cur = cur.parent;
+  }
+  return ids;
+}
+
+/** Ancestor-aware indexing: register the flow under both endpoints AND their
+ *  ancestor chains, so dragging any container (a screen, section, or the
+ *  component instance an endpoint is buried in) rerenders the flow. */
+function indexFlowWithAncestors(flowId: string, fromNode: BaseNode, toNode: BaseNode): void {
+  const ids = new Set<string>();
+  for (const id of ancestorChainIds(fromNode)) ids.add(id);
+  for (const id of ancestorChainIds(toNode)) ids.add(id);
+  setFlowIndex(flowId, fromNode.id, toNode.id, ids);
+}
+
 function unindexFlow(flowId: string): void {
   lastRenderHash.delete(flowId);
-  const eps = flowToEndpoints.get(flowId);
-  if (!eps) return;
   flowToEndpoints.delete(flowId);
-  for (const epId of eps) {
-    const s = endpointToFlows.get(epId);
-    if (s) { s.delete(flowId); if (s.size === 0) endpointToFlows.delete(epId); }
+  const ids = flowToIndexedIds.get(flowId);
+  if (!ids) return;
+  flowToIndexedIds.delete(flowId);
+  for (const id of ids) {
+    const s = endpointToFlows.get(id);
+    if (s) { s.delete(flowId); if (s.size === 0) endpointToFlows.delete(id); }
   }
 }
 
@@ -1052,6 +1115,7 @@ function unindexFlow(flowId: string): void {
 function bootstrapEndpointIndexForCurrentPage(): void {
   endpointToFlows.clear();
   flowToEndpoints.clear();
+  flowToIndexedIds.clear();
   flowToLabel.clear();
   labelToFlow.clear();
   frameUuidOwner.clear();
@@ -1063,6 +1127,44 @@ function bootstrapEndpointIndexForCurrentPage(): void {
     if (m.labelNodeId) {
       flowToLabel.set(child.id, m.labelNodeId);
       labelToFlow.set(m.labelNodeId, child.id);
+    }
+  }
+}
+
+/** Async follow-up to the shallow bootstrap. The bootstrap indexes each flow
+ *  under its two endpoint *node ids* only — but an endpoint can be buried in a
+ *  component instance, and Figma fires documentchange on the moved screen, not
+ *  the buried child, so that flow would never rerender on a drag. Here we
+ *  resolve each indexed flow's live endpoints and re-index under their full
+ *  ancestor chains (so moving any containing screen/section reaches the flow),
+ *  and render any orphan so it re-links (UUID, else spatial).
+ *
+ *  Iterates only the already-indexed flows — NOT the whole page tree. On a
+ *  busy document a full findAllWithCriteria sweep + per-node .name access
+ *  costs hundreds of ms (measured ~300ms on a 3k-node page) every open and
+ *  page change; touching only the handful of real flows keeps it O(flows).
+ *  (Flows are created at page level, so the shallow bootstrap already finds
+ *  them all; a flow vector manually nested inside a frame is the rare case we
+ *  trade away to keep open instant.) */
+async function reindexAndHealAllFlows(): Promise<void> {
+  // Snapshot ids first — indexFlowWithAncestors / unindexFlow mutate the map.
+  const flowIds = [...flowToEndpoints.keys()];
+  for (const flowId of flowIds) {
+    const node = await figma.getNodeByIdAsync(flowId) as SceneNode | null;
+    if (!node || node.removed) { unindexFlow(flowId); continue; }
+    const meta = readMeta(node);
+    if (!meta) { unindexFlow(flowId); continue; }
+    const from = await figma.getNodeByIdAsync(meta.fromNodeId) as SceneNode | null;
+    const to = await figma.getNodeByIdAsync(meta.toNodeId) as SceneNode | null;
+    if (!from || !to || from.removed || to.removed) {
+      // Orphan (e.g. post copy-paste): render to re-link (UUID, else spatial);
+      // renderVectorFlow re-indexes under the healed live endpoints.
+      void enqueueRender(node, meta);
+    } else {
+      // Healthy: re-index under endpoints + their ancestor chains so moving any
+      // containing screen/section/instance rerenders the flow. No re-render
+      // needed — geometry is already correct, it just needs to be findable.
+      indexFlowWithAncestors(flowId, from, to);
     }
   }
 }
