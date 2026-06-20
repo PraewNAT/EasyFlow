@@ -2,7 +2,7 @@
 // Build marker — bump on every behaviour change so the user can verify
 // Figma actually loaded the latest dist (Figma aggressively caches
 // development plugins; older bundles persist across reloads).
-console.log('[EasyFlow] build 2026-06-17-add-preset-keep-anchor loaded');
+console.log('[EasyFlow] build 2026-06-21-frame-uuid-relink loaded');
 
 // Safety net: any rejection that escapes a handler (e.g. a getPluginData
 // throw on a node Figma silently deleted) shouldn't crash the plugin or
@@ -48,6 +48,19 @@ import {
 
 /** Plugin data on label/frame nodes so clicks promote to the flow vector. */
 const LABEL_OWNER_KEY = 'easyflow.owner';
+
+/** Plugin data on an endpoint node holding a stable EasyFlow-minted UUID.
+ *  Unlike Figma's node id this survives a cross-file copy/paste, so an
+ *  orphaned flow (whose saved node ids no longer resolve) can re-link by
+ *  matching the UUID stamped on the pasted endpoint. */
+const FRAME_UUID_KEY = 'easyflow.frameId';
+
+/** Session map: frame UUID → the node id that currently owns it. Figma also
+ *  copies plugin data on a *same-file* duplicate, so a copied endpoint frame
+ *  carries the original's UUID. When we see a UUID already owned by a
+ *  different live node we mint a fresh one for the newcomer, keeping every
+ *  endpoint uniquely identifiable. Cleared on page bootstrap. */
+const frameUuidOwner = new Map<string, string>();
 
 // ---------------------------------------------------------------------------
 // Plugin bootstrap — everything synchronous so it's ready on the first event
@@ -736,12 +749,13 @@ async function renderVectorFlow(vec: VectorNode, meta: FlowMeta): Promise<void> 
   let fromNode = await figma.getNodeByIdAsync(meta.fromNodeId) as SceneNode | null;
   let toNode = await figma.getNodeByIdAsync(meta.toNodeId) as SceneNode | null;
   if (!fromNode || !toNode || fromNode.removed || toNode.removed) {
-    // Try spatial heal — common after a cross-file copy/paste, where the
-    // pasted vec retains the OLD endpoint ids (which don't exist in the
-    // new file). The vec's geometry is preserved by Figma, so the first
-    // and last vertex still sit exactly on the source/target frame edges
-    // — we just need to find which frames in this page they belong to.
-    const healed = await healOrphanedFlow(vec);
+    // Orphaned — common after a cross-file copy/paste, where the pasted vec
+    // retains the OLD endpoint ids (which don't exist in the new file).
+    // First try the UUID re-linker (identity match, stamped on the pasted
+    // frames), then fall back to spatial heal: the vec's geometry is
+    // preserved by Figma, so its first/last vertex still sit on the
+    // source/target frame edges and we can find which frames they belong to.
+    const healed = healByUuid(meta) ?? await healOrphanedFlow(vec);
     if (healed) {
       unindexFlow(vec.id);
       meta = { ...meta, fromNodeId: healed.fromNodeId, toNodeId: healed.toNodeId };
@@ -757,6 +771,17 @@ async function renderVectorFlow(vec: VectorNode, meta: FlowMeta): Promise<void> 
       vec.remove();
       return;
     }
+  }
+
+  // Stamp both endpoints with a stable UUID and record them on the flow, so a
+  // future cross-file paste can re-link by identity. Persist immediately
+  // (not via the writeMeta at the end) because the hash early-return below can
+  // skip the rest of render — but we still want old flows to gain their UUIDs.
+  const fromUuid = ensureFrameUuid(fromNode);
+  const toUuid = ensureFrameUuid(toNode);
+  if (meta.fromFrameUuid !== fromUuid || meta.toFrameUuid !== toUuid) {
+    meta = { ...meta, fromFrameUuid: fromUuid, toFrameUuid: toUuid };
+    writeMeta(vec, meta);
   }
 
   const fromBox = absoluteBox(fromNode);
@@ -844,12 +869,34 @@ async function renderVectorFlow(vec: VectorNode, meta: FlowMeta): Promise<void> 
 }
 
 async function renderLegacyFrameFlow(wrapper: FrameNode, meta: FlowMeta): Promise<void> {
-  const fromNode = await figma.getNodeByIdAsync(meta.fromNodeId) as SceneNode | null;
-  const toNode = await figma.getNodeByIdAsync(meta.toNodeId) as SceneNode | null;
+  let fromNode = await figma.getNodeByIdAsync(meta.fromNodeId) as SceneNode | null;
+  let toNode = await figma.getNodeByIdAsync(meta.toNodeId) as SceneNode | null;
   if (!fromNode || !toNode || fromNode.removed || toNode.removed) {
-    lastRenderHash.delete(wrapper.id);
-    wrapper.remove();
-    return;
+    // Orphaned (e.g. cross-file paste). Legacy wrappers have no preserved
+    // vector geometry to spatially heal from, but a UUID match still works.
+    const healed = healByUuid(meta);
+    if (healed) {
+      unindexFlow(wrapper.id);
+      meta = { ...meta, fromNodeId: healed.fromNodeId, toNodeId: healed.toNodeId };
+      writeMeta(wrapper, meta);
+      indexFlowEndpoints(wrapper.id, meta.fromNodeId, meta.toNodeId);
+      fromNode = await figma.getNodeByIdAsync(meta.fromNodeId) as SceneNode | null;
+      toNode = await figma.getNodeByIdAsync(meta.toNodeId) as SceneNode | null;
+    }
+    if (!fromNode || !toNode || fromNode.removed || toNode.removed) {
+      unindexFlow(wrapper.id);
+      lastRenderHash.delete(wrapper.id);
+      wrapper.remove();
+      return;
+    }
+  }
+
+  // Same lazy UUID stamping as the vector path (see renderVectorFlow).
+  const fromUuid = ensureFrameUuid(fromNode);
+  const toUuid = ensureFrameUuid(toNode);
+  if (meta.fromFrameUuid !== fromUuid || meta.toFrameUuid !== toUuid) {
+    meta = { ...meta, fromFrameUuid: fromUuid, toFrameUuid: toUuid };
+    writeMeta(wrapper, meta);
   }
 
   const fromBox = absoluteBox(fromNode);
@@ -1007,6 +1054,7 @@ function bootstrapEndpointIndexForCurrentPage(): void {
   flowToEndpoints.clear();
   flowToLabel.clear();
   labelToFlow.clear();
+  frameUuidOwner.clear();
   for (const child of figma.currentPage.children) {
     if (child.type !== 'VECTOR' && child.type !== 'FRAME') continue;
     const m = readMeta(child);
@@ -1200,6 +1248,74 @@ function absoluteBox(node: SceneNode): Box {
   return { x: node.x, y: node.y, width: node.width, height: node.height };
 }
 
+/** Mint a fresh, reasonably-unique identifier. Prefixed so it's obvious in
+ *  Figma's plugin-data inspector that EasyFlow owns it. crypto.randomUUID is
+ *  available in modern Figma, but we fall back to time+random so the plugin
+ *  never throws on an older host. */
+function genFrameUuid(): string {
+  const c = (globalThis as { crypto?: { randomUUID?: () => string } }).crypto;
+  if (c && typeof c.randomUUID === 'function') return 'ef-' + c.randomUUID();
+  const rand = () => Math.random().toString(36).slice(2, 10);
+  return 'ef-' + Date.now().toString(36) + '-' + rand() + rand();
+}
+
+/** Read an endpoint node's EasyFlow UUID, minting and stamping one if absent.
+ *  Also re-mints when the stored UUID is already claimed by a *different*
+ *  live node this session (a same-file duplicate carried the plugin data
+ *  over), so each endpoint stays uniquely identifiable. Returns the UUID. */
+function ensureFrameUuid(node: SceneNode): string {
+  let uuid = '';
+  try { uuid = node.getPluginData(FRAME_UUID_KEY); } catch { uuid = ''; }
+  if (uuid) {
+    const owner = frameUuidOwner.get(uuid);
+    if (owner && owner !== node.id) uuid = ''; // duplicate → re-mint below
+  }
+  if (!uuid) {
+    uuid = genFrameUuid();
+    try { node.setPluginData(FRAME_UUID_KEY, uuid); } catch { /* read-only host */ }
+  }
+  frameUuidOwner.set(uuid, node.id);
+  return uuid;
+}
+
+/** Find the connectable node on the current page stamped with `uuid`.
+ *  Returns its node id, or null when there's no match — or more than one
+ *  (an ambiguous duplicate, where guessing could relink to the wrong frame;
+ *  callers fall back to spatial heal instead). */
+function findNodeByFrameUuid(uuid: string): string | null {
+  if (!uuid) return null;
+  let match: string | null = null;
+  let count = 0;
+  const stack: SceneNode[] = [...figma.currentPage.children];
+  while (stack.length) {
+    const node = stack.pop()!;
+    if ('children' in node && node.children) {
+      for (const c of node.children) stack.push(c);
+    }
+    if (!isConnectableNode(node)) continue;
+    let u = '';
+    try { u = node.getPluginData(FRAME_UUID_KEY); } catch { u = ''; }
+    if (u === uuid) {
+      match = node.id;
+      if (++count > 1) return null; // ambiguous — defer to spatial heal
+    }
+  }
+  return count === 1 ? match : null;
+}
+
+/** Precise re-linker for an orphaned flow: resolve both endpoints by the
+ *  UUIDs saved in its meta. Preferred over spatial heal because it matches
+ *  identity, not proximity — robust even when endpoints moved far or several
+ *  same-size frames sit nearby. Returns null when either side is missing or
+ *  ambiguous, or both resolve to the same node. */
+function healByUuid(meta: FlowMeta): { fromNodeId: string; toNodeId: string } | null {
+  if (!meta.fromFrameUuid || !meta.toFrameUuid) return null;
+  const from = findNodeByFrameUuid(meta.fromFrameUuid);
+  const to = findNodeByFrameUuid(meta.toFrameUuid);
+  if (!from || !to || from === to) return null;
+  return { fromNodeId: from, toNodeId: to };
+}
+
 /**
  * Heuristic re-linker for orphaned flow vectors (typically post copy-paste
  * across files): the saved fromNodeId/toNodeId no longer resolve, but the
@@ -1313,6 +1429,7 @@ function extractStyle(meta: FlowMeta): FlowStyle {
   const {
     fromNodeId: _f, toNodeId: _t, labelNodeId: _l,
     startOffset: _s, endOffset: _e, betweenOffset: _b,
+    fromFrameUuid: _fu, toFrameUuid: _tu,
     ...style
   } = meta;
   return style;

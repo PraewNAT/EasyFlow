@@ -33,6 +33,15 @@ export interface FlowStyle {
 export interface FlowMeta extends FlowStyle {
   fromNodeId: string;
   toNodeId: string;
+  /** Stable EasyFlow-minted UUID of the source endpoint, also stamped onto
+   *  that node's own plugin data (key `easyflow.frameId`). Figma reassigns
+   *  node ids on a cross-file copy/paste but preserves plugin data, so when
+   *  the saved fromNodeId stops resolving we can still re-link the flow by
+   *  matching this UUID against the pasted endpoint. Optional: flows created
+   *  before this feature gain it lazily on their first successful render. */
+  fromFrameUuid?: string;
+  /** Same as fromFrameUuid but for the target endpoint. */
+  toFrameUuid?: string;
   /** Optional text/frame used as label; parented next to the flow vector (not serialized to UI style). */
   labelNodeId?: string;
   /** Position of the start anchor along its chosen edge. 0–1; default 0.5 = center.
