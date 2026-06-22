@@ -2,7 +2,7 @@
 // Build marker — bump on every behaviour change so the user can verify
 // Figma actually loaded the latest dist (Figma aggressively caches
 // development plugins; older bundles persist across reloads).
-console.log('[EasyFlow] build 2026-06-22-rendercache-fix loaded');
+console.log('[EasyFlow] build 2026-06-22-batch-uuid-heal loaded');
 
 // Safety net: any rejection that escapes a handler (e.g. a getPluginData
 // throw on a node Figma silently deleted) shouldn't crash the plugin or
@@ -1170,6 +1170,12 @@ function bootstrapEndpointIndexForCurrentPage(): void {
 async function reindexAndHealAllFlows(): Promise<void> {
   // Snapshot ids first — indexFlowWithAncestors / unindexFlow mutate the map.
   const flowIds = [...flowToEndpoints.keys()];
+  // Built on demand the first time we hit an orphan, then reused for every
+  // other orphan in this pass. Without it, a cross-file paste of N flows would
+  // make N×2 full-page UUID scans (one per endpoint per flow); with it, one
+  // O(nodes) sweep serves them all. Stays null when there are no orphans so a
+  // healthy document pays nothing.
+  let uuidIndex: FrameUuidIndex | null = null;
   for (const flowId of flowIds) {
     const node = await figma.getNodeByIdAsync(flowId) as SceneNode | null;
     if (!node || node.removed) { unindexFlow(flowId); continue; }
@@ -1177,15 +1183,28 @@ async function reindexAndHealAllFlows(): Promise<void> {
     if (!meta) { unindexFlow(flowId); continue; }
     const from = await figma.getNodeByIdAsync(meta.fromNodeId) as SceneNode | null;
     const to = await figma.getNodeByIdAsync(meta.toNodeId) as SceneNode | null;
-    if (!from || !to || from.removed || to.removed) {
-      // Orphan (e.g. post copy-paste): render to re-link (UUID, else spatial);
-      // renderVectorFlow re-indexes under the healed live endpoints.
-      void enqueueRender(node, meta);
-    } else {
+    if (from && to && !from.removed && !to.removed) {
       // Healthy: re-index under endpoints + their ancestor chains so moving any
       // containing screen/section/instance rerenders the flow. No re-render
       // needed — geometry is already correct, it just needs to be findable.
       indexFlowWithAncestors(flowId, from, to);
+      continue;
+    }
+    // Orphan (e.g. post copy-paste). Try the shared UUID index first; if both
+    // endpoints resolve we relink here and hand render a healthy meta, so its
+    // orphan branch (which would otherwise do its own full-page UUID walk) is
+    // skipped entirely.
+    if (uuidIndex === null) uuidIndex = buildFrameUuidIndex();
+    const healed = healByUuid(meta, uuidIndex);
+    if (healed) {
+      const next: FlowMeta = { ...meta, fromNodeId: healed.fromNodeId, toNodeId: healed.toNodeId };
+      writeMeta(node, next);
+      indexFlowEndpoints(flowId, next.fromNodeId, next.toNodeId);
+      void enqueueRender(node, next);
+    } else {
+      // No UUID match — let render fall back to spatial heal (it needs the
+      // vector's live geometry, which only exists at render time).
+      void enqueueRender(node, meta);
     }
   }
 }
@@ -1401,12 +1420,46 @@ function ensureFrameUuid(node: SceneNode): string {
   return uuid;
 }
 
+/** Prebuilt lookup from frame UUID → owning node id, for healing a batch of
+ *  orphans without re-walking the page per flow. A `null` value marks an
+ *  ambiguous UUID (stamped on more than one live node) so callers treat it the
+ *  same as "no match" and fall back to spatial heal. A missing key = no match. */
+type FrameUuidIndex = Map<string, string | null>;
+
+/** Walk the current page once and map every EasyFlow frame UUID to its node.
+ *  Built lazily by reindexAndHealAllFlows when it actually finds orphans, then
+ *  shared across all of them — turning the heal pass from O(orphans × nodes)
+ *  full-tree scans into a single O(nodes) sweep. */
+function buildFrameUuidIndex(): FrameUuidIndex {
+  const index: FrameUuidIndex = new Map();
+  const stack: SceneNode[] = [...figma.currentPage.children];
+  while (stack.length) {
+    const node = stack.pop()!;
+    if ('children' in node && node.children) {
+      for (const c of node.children) stack.push(c);
+    }
+    if (!isConnectableNode(node)) continue;
+    let u = '';
+    try { u = node.getPluginData(FRAME_UUID_KEY); } catch { u = ''; }
+    if (!u) continue;
+    // First sighting records the id; any repeat collapses it to null (ambiguous).
+    index.set(u, index.has(u) ? null : node.id);
+  }
+  return index;
+}
+
 /** Find the connectable node on the current page stamped with `uuid`.
  *  Returns its node id, or null when there's no match — or more than one
  *  (an ambiguous duplicate, where guessing could relink to the wrong frame;
- *  callers fall back to spatial heal instead). */
-function findNodeByFrameUuid(uuid: string): string | null {
+ *  callers fall back to spatial heal instead).
+ *  Pass `index` (from buildFrameUuidIndex) to resolve via a shared map instead
+ *  of a fresh full-page walk — used when healing many orphans at once. */
+function findNodeByFrameUuid(uuid: string, index?: FrameUuidIndex): string | null {
   if (!uuid) return null;
+  if (index) {
+    // null (ambiguous) and undefined (absent) both mean "no confident match".
+    return index.get(uuid) ?? null;
+  }
   let match: string | null = null;
   let count = 0;
   const stack: SceneNode[] = [...figma.currentPage.children];
@@ -1430,11 +1483,12 @@ function findNodeByFrameUuid(uuid: string): string | null {
  *  UUIDs saved in its meta. Preferred over spatial heal because it matches
  *  identity, not proximity — robust even when endpoints moved far or several
  *  same-size frames sit nearby. Returns null when either side is missing or
- *  ambiguous, or both resolve to the same node. */
-function healByUuid(meta: FlowMeta): { fromNodeId: string; toNodeId: string } | null {
+ *  ambiguous, or both resolve to the same node.
+ *  `index`, when given, resolves both lookups against a shared prebuilt map. */
+function healByUuid(meta: FlowMeta, index?: FrameUuidIndex): { fromNodeId: string; toNodeId: string } | null {
   if (!meta.fromFrameUuid || !meta.toFrameUuid) return null;
-  const from = findNodeByFrameUuid(meta.fromFrameUuid);
-  const to = findNodeByFrameUuid(meta.toFrameUuid);
+  const from = findNodeByFrameUuid(meta.fromFrameUuid, index);
+  const to = findNodeByFrameUuid(meta.toFrameUuid, index);
   if (!from || !to || from === to) return null;
   return { fromNodeId: from, toNodeId: to };
 }
