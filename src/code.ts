@@ -1060,7 +1060,13 @@ function scheduleFlowRerenderForMovedEndpoints(): void {
  *  for the post-load catch-up). Idempotent: clears the flow's prior entries
  *  first, so re-indexing after a re-parent leaves no stale ancestor links. */
 function setFlowIndex(flowId: string, fromId: string, toId: string, indexIds: Set<string>): void {
-  unindexFlow(flowId);
+  // clearFlowIndexEntries — NOT unindexFlow — so re-indexing keeps the render
+  // cache. indexFlowWithAncestors runs on every render (incl. each drag frame);
+  // wiping lastRenderHash here would defeat the renderInputHash short-circuit
+  // (it'd never match), forcing a full setVectorNetworkAsync even on no-op
+  // renders. The geometry we last drew is still valid, so the cache must
+  // survive a re-index. Only true removal (unindexFlow) drops it.
+  clearFlowIndexEntries(flowId);
   flowToEndpoints.set(flowId, [fromId, toId]);
   flowToIndexedIds.set(flowId, indexIds);
   for (const id of indexIds) {
@@ -1099,8 +1105,11 @@ function indexFlowWithAncestors(flowId: string, fromNode: BaseNode, toNode: Base
   setFlowIndex(flowId, fromNode.id, toNode.id, ids);
 }
 
-function unindexFlow(flowId: string): void {
-  lastRenderHash.delete(flowId);
+/** Remove a flow from the reverse indices only — leaves its render cache
+ *  (lastRenderHash) intact. This is the routine re-index cleanup; the cached
+ *  geometry stays valid across a re-index, so we must not invalidate it here
+ *  (see setFlowIndex). */
+function clearFlowIndexEntries(flowId: string): void {
   flowToEndpoints.delete(flowId);
   const ids = flowToIndexedIds.get(flowId);
   if (!ids) return;
@@ -1109,6 +1118,15 @@ function unindexFlow(flowId: string): void {
     const s = endpointToFlows.get(id);
     if (s) { s.delete(flowId); if (s.size === 0) endpointToFlows.delete(id); }
   }
+}
+
+/** Full untrack: drop the flow from the indices AND from the render cache.
+ *  Use only when the flow is genuinely gone or orphaned (removed node, DELETE
+ *  event, heal give-up) — clearing the cache forces a fresh render if it ever
+ *  re-links. */
+function unindexFlow(flowId: string): void {
+  lastRenderHash.delete(flowId);
+  clearFlowIndexEntries(flowId);
 }
 
 /** Build the reverse index from existing flows on the current page.
