@@ -3,6 +3,7 @@
     "target": "ES2017",
     "module": "ESNext",
     "moduleResolution": "Bundler",
+    "allowImportingTsExtensions": true,
     "lib": ["ES2017", "DOM"],
     "strict": true,
     "noImplicitAny": true,
@@ -11,5 +12,10 @@
     "forceConsistentCasingInFileNames": true,
     "typeRoots": ["./node_modules/@figma", "./node_modules/@types"]
   },
-  "include": ["src/**/*.ts"]
+  "include": ["src/**/*.ts"],
+  // Tests run under Node's built-in runner (node --test), which type-strips
+  // rather than type-checks and provides node: builtins at runtime. They're
+  // excluded from the plugin typecheck so it stays focused on plugin code and
+  // doesn't need @types/node (which can clash with the Figma sandbox globals).
+  "exclude": ["src/**/*.test.ts"]
 }
