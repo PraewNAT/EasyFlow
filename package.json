@@ -5,7 +5,8 @@
   "scripts": {
     "build": "node build.js",
     "watch": "node build.js --watch",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "test": "node --test src/*.test.ts"
   },
   "devDependencies": {
     "@figma/plugin-typings": "^1.100.2",

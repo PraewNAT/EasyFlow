@@ -33,6 +33,43 @@
           Roboto, sans-serif;
         font-size: 12px;
       }
+      /* html needs an explicit height so its overflow-y: auto can produce a
+         scrollbar — without height:100% it just grows to fit body content
+         and the overflow rule is a no-op. In auto-fit mode the sandbox
+         resizes the window to match the body, so there's nothing to scroll
+         and the scrollbar stays hidden; once the user drags smaller than
+         content, the scrollbar appears. */
+      html { height: 100%; overflow-x: hidden; overflow-y: auto; }
+      /* Resize grip — fixed bottom-right corner. Three diagonal slashes
+         (macOS / Windows convention) so it's immediately recognizable. */
+      .resize-handle {
+        position: fixed;
+        right: 0;
+        bottom: 0;
+        width: 22px;
+        height: 22px;
+        cursor: nwse-resize;
+        z-index: 9999;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        color: var(--text);
+        background: transparent;
+        border-radius: 4px 0 0 0;
+        transition: background 120ms ease, color 120ms ease;
+      }
+      .resize-handle svg {
+        opacity: 0.75;
+        transition: opacity 120ms ease;
+      }
+      .resize-handle:hover {
+        background: var(--surface-2);
+      }
+      .resize-handle:hover svg { opacity: 1; }
+      /* While resizing, disable selection and force the resize cursor
+         globally so the cursor doesn't flicker over text/buttons. */
+      html.resizing,
+      html.resizing * { cursor: nwse-resize !important; user-select: none !important; }
 
       .toggle-header {
         display: flex;
@@ -44,6 +81,14 @@
         flex: 1;
         min-width: 0;
       }
+      /* Compact the toggle row — it sits at the top of the panel and
+         doesn't need the same generous padding as content sections. */
+      .section.toggle-section {
+        padding: 6px 14px;
+      }
+      .toggle-section .toggle-row .label {
+        font-size: 12px;
+      }
       /* Sections */
       .section {
         background: var(--surface);
@@ -52,6 +97,48 @@
       }
       .section.muted {
         background: var(--surface-2);
+      }
+      /* Accordion: section header is the toggle. Content sits in
+         .accordion-body so the header stays in place when collapsed. */
+      .accordion .accordion-header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        width: 100%;
+        background: transparent;
+        border: 0;
+        padding: 0 0 10px 0;
+        cursor: pointer;
+        color: var(--text-muted);
+        font-size: 11px;
+        font-weight: 500;
+        text-transform: uppercase;
+        letter-spacing: 0.04em;
+      }
+      .accordion .accordion-header:hover {
+        color: var(--text);
+      }
+      .accordion .accordion-header .chev {
+        transition: transform 0.15s ease;
+        flex-shrink: 0;
+      }
+      .accordion.collapsed .accordion-header {
+        padding-bottom: 0;
+      }
+      .accordion.collapsed .accordion-header .chev {
+        transform: rotate(-90deg);
+      }
+      .accordion.collapsed .accordion-body {
+        display: none;
+      }
+      .accordion .accordion-header-aux {
+        font-size: 11px;
+        color: var(--accent);
+        font-weight: 600;
+        text-transform: none;
+        letter-spacing: 0;
+        margin-left: auto;
+        margin-right: 8px;
       }
       .row {
         display: flex;
@@ -160,7 +247,7 @@
         background: var(--border);
         flex-shrink: 0;
       }
-      /* Hex + opacity row: spinner + narrow width was clipping “100” → “10” */
+      /* Hex + opacity row: spinner + narrow width was clipping "100" → "10" */
       .field.field-stroke-row input#stroke-color {
         flex: 1 1 auto;
         width: auto;
@@ -375,6 +462,156 @@
         background: rgba(37, 99, 235, 0.08);
       }
 
+      /* Path Offset section — shown only when an EasyFlow flow is selected */
+      .path-offset-section {
+        background: var(--surface);
+      }
+      .path-offset-row {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        margin-bottom: 8px;
+      }
+      .path-offset-label {
+        font-size: 11px;
+        font-weight: 500;
+        color: var(--text-muted);
+        text-transform: uppercase;
+        letter-spacing: 0.04em;
+      }
+      .path-offset-reset {
+        flex-shrink: 0;
+        background: transparent;
+        border: 0;
+        cursor: pointer;
+        color: var(--text-muted);
+        width: 22px;
+        height: 22px;
+        border-radius: 4px;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+      }
+      .path-offset-reset:hover {
+        background: var(--surface-2);
+        color: var(--text);
+      }
+      .path-offset-track {
+        position: relative;
+        height: 24px;
+        display: flex;
+        align-items: center;
+        margin-bottom: 6px;
+      }
+      .path-offset-ticks {
+        position: absolute;
+        left: 8px;
+        right: 8px;
+        top: 50%;
+        transform: translateY(-50%);
+        display: flex;
+        justify-content: space-between;
+        pointer-events: none;
+      }
+      .path-offset-ticks span {
+        width: 1px;
+        height: 10px;
+        background: var(--border-strong);
+      }
+      .path-offset-track input[type='range'] {
+        -webkit-appearance: none;
+        appearance: none;
+        width: 100%;
+        height: 4px;
+        background: var(--border);
+        border-radius: 2px;
+        outline: none;
+        cursor: pointer;
+        position: relative;
+        z-index: 1;
+        margin: 0;
+      }
+      .path-offset-track input[type='range']::-webkit-slider-runnable-track {
+        height: 4px;
+        background: var(--border);
+        border-radius: 2px;
+      }
+      .path-offset-track input[type='range']::-webkit-slider-thumb {
+        -webkit-appearance: none;
+        appearance: none;
+        width: 14px;
+        height: 14px;
+        margin-top: -5px;
+        border-radius: 50%;
+        background: var(--accent);
+        border: 2px solid #ffffff;
+        box-shadow: 0 1px 2px rgba(0, 0, 0, 0.25);
+        cursor: grab;
+      }
+      .path-offset-track input[type='range']:active::-webkit-slider-thumb {
+        cursor: grabbing;
+      }
+      .path-offset-track input[type='range']:disabled {
+        cursor: not-allowed;
+        opacity: 0.45;
+      }
+      .path-offset-track input[type='range']:disabled::-webkit-slider-thumb {
+        background: var(--text-muted);
+      }
+      .po-slider-grid {
+        display: flex;
+        gap: 10px;
+        align-items: stretch;
+      }
+      .po-slider-col {
+        flex: 1;
+        min-width: 0;
+        display: flex;
+        flex-direction: column;
+        gap: 4px;
+      }
+      .po-slider-label {
+        font-size: 11px;
+        color: var(--text-muted);
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+      .po-slider-col.disabled .po-slider-label,
+      .po-slider-col.disabled .path-offset-reset {
+        opacity: 0.45;
+      }
+      .po-slider-head {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 6px;
+      }
+      .po-slider-col .path-offset-track {
+        margin-bottom: 0;
+      }
+      .po-slider-col.mixed .path-offset-track input[type='range']::-webkit-slider-thumb {
+        opacity: 0;
+      }
+      .path-offset-mixed-label {
+        position: absolute;
+        left: 50%;
+        top: 50%;
+        transform: translate(-50%, -50%);
+        font-size: 10px;
+        font-style: italic;
+        color: var(--text-muted);
+        background: var(--surface);
+        padding: 1px 6px;
+        pointer-events: none;
+        z-index: 2;
+      }
+      .path-offset-help {
+        font-size: 10px;
+        color: var(--text-muted);
+        line-height: 1.4;
+      }
+
       /* Anchor preview area */
       .anchor-area {
         display: grid;
@@ -551,16 +788,22 @@
         text-align: right;
       }
       .preset-row {
-        display: grid;
-        grid-template-columns: repeat(3, 1fr);
+        display: flex;
+        flex-wrap: wrap;
         gap: 6px;
+        align-items: center;
+      }
+      /* Wrapper for user presets (has delete button) */
+      .preset-btn-wrap {
+        position: relative;
+        display: inline-flex;
       }
       .preset-btn {
         display: inline-flex;
         align-items: center;
         justify-content: center;
         gap: 6px;
-        padding: 8px 4px;
+        padding: 6px 10px;
         background: var(--surface);
         border: 1px solid var(--border-strong);
         border-radius: var(--radius-sm);
@@ -569,6 +812,7 @@
         color: var(--text);
         font-family: inherit;
         font-weight: 500;
+        white-space: nowrap;
       }
       .preset-btn:hover {
         border-color: var(--accent);
@@ -584,12 +828,97 @@
         box-shadow: inset 0 0 0 1px rgba(37, 99, 235, 0.22);
       }
       .preset-swatch {
-        width: 12px;
-        height: 12px;
+        width: 10px;
+        height: 10px;
         border-radius: 3px;
         flex-shrink: 0;
         border: 1px solid rgba(0, 0, 0, 0.12);
-        background: #00eeff;
+      }
+      /* Delete button — shown on hover over the wrap */
+      .preset-delete-btn {
+        position: absolute;
+        top: -5px;
+        right: -5px;
+        width: 14px;
+        height: 14px;
+        background: var(--danger);
+        color: #fff;
+        border: none;
+        border-radius: 50%;
+        font-size: 11px;
+        line-height: 1;
+        cursor: pointer;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        padding: 0;
+        opacity: 0;
+        transition: opacity 0.12s;
+        z-index: 10;
+      }
+      .preset-btn-wrap:hover .preset-delete-btn {
+        opacity: 1;
+      }
+      /* Add preset button */
+      .preset-add-btn {
+        display: inline-flex;
+        align-items: center;
+        gap: 4px;
+        padding: 6px 10px;
+        background: transparent;
+        border: 1px dashed var(--border-strong);
+        border-radius: var(--radius-sm);
+        cursor: pointer;
+        font-size: 11px;
+        color: var(--text-muted);
+        font-family: inherit;
+        white-space: nowrap;
+      }
+      .preset-add-btn:hover {
+        border-color: var(--accent);
+        color: var(--accent);
+        background: rgba(37, 99, 235, 0.04);
+      }
+      /* Inline name form */
+      .preset-name-form {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        margin-top: 8px;
+      }
+      .preset-name-input-field {
+        flex: 1;
+        height: 30px;
+        padding: 0 8px;
+        font-size: 12px;
+        font-family: inherit;
+        background: var(--surface);
+        border: 1px solid var(--accent);
+        border-radius: var(--radius-sm);
+        outline: 0;
+        color: var(--text);
+        box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.15);
+      }
+      .preset-name-btn {
+        width: 28px;
+        height: 28px;
+        border-radius: var(--radius-sm);
+        border: 1px solid var(--border-strong);
+        background: var(--surface);
+        cursor: pointer;
+        font-size: 13px;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        padding: 0;
+        flex-shrink: 0;
+      }
+      .preset-name-btn.confirm {
+        color: var(--accent);
+        border-color: var(--accent);
+      }
+      .preset-name-btn.cancel {
+        color: var(--text-muted);
       }
       .help-section {
         background: var(--surface-2);
@@ -606,6 +935,14 @@
   </head>
 
   <body>
+    <!-- Drag-to-resize grip (fixed bottom-right) -->
+    <div class="resize-handle" id="resize-handle" title="Drag to resize">
+      <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round">
+        <line x1="13" y1="3"  x2="3"  y2="13" />
+        <line x1="13" y1="7"  x2="7"  y2="13" />
+        <line x1="13" y1="11" x2="11" y2="13" />
+      </svg>
+    </div>
     <!-- Toggle -->
     <section class="section toggle-section">
       <div class="toggle-header">
@@ -617,7 +954,14 @@
     </section>
 
     <!-- Color & line type -->
-    <section class="section">
+    <section class="section accordion" data-accordion="style">
+      <button type="button" class="accordion-header" aria-expanded="true">
+        <span>Style</span>
+        <svg class="chev" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+          <polyline points="6 9 12 15 18 9"></polyline>
+        </svg>
+      </button>
+      <div class="accordion-body">
       <div class="row">
         <div class="field field-stroke-row" style="flex: 2;">
           <span class="swatch" style="background: #00eeff;">
@@ -719,6 +1063,7 @@
           </div>
         </div>
       </div>
+      </div>
     </section>
 
     <!-- Anchor area -->
@@ -740,10 +1085,119 @@
         <div class="frame-label" id="to-name"></div>
       </div>
     </div>
-    <div class="endpoint-info" id="endpoint-info" style="display: none;"></div>
+    <!-- Path Offset section: per-endpoint anchor sliders (visible only when a flow is selected) -->
+    <section class="section path-offset-section" id="path-offset-section" hidden>
+      <div class="po-slider-grid">
+        <div class="po-slider-col" id="po-start-row">
+          <div class="po-slider-head">
+            <span class="po-slider-label">Start path offset</span>
+            <button
+              type="button"
+              class="path-offset-reset"
+              id="po-start-reset"
+              title="Reset start offset"
+              aria-label="Reset start offset"
+            >
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" width="12" height="12">
+                <path d="M3 12a9 9 0 1 0 3.2-6.9" />
+                <path d="M3 4v5h5" />
+              </svg>
+            </button>
+          </div>
+          <div class="path-offset-track">
+            <div class="path-offset-ticks" aria-hidden="true">
+              <span></span><span></span><span></span><span></span><span></span>
+            </div>
+            <input
+              type="range"
+              id="po-start-slider"
+              min="0"
+              max="1"
+              step="0.001"
+              value="0.5"
+              aria-label="Start anchor offset"
+            />
+            <div class="path-offset-mixed-label" id="po-start-mixed" hidden>Mixed</div>
+          </div>
+        </div>
+
+        <div class="po-slider-col" id="po-end-row">
+          <div class="po-slider-head">
+            <span class="po-slider-label">End path offset</span>
+            <button
+              type="button"
+              class="path-offset-reset"
+              id="po-end-reset"
+              title="Reset end offset"
+              aria-label="Reset end offset"
+            >
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" width="12" height="12">
+                <path d="M3 12a9 9 0 1 0 3.2-6.9" />
+                <path d="M3 4v5h5" />
+              </svg>
+            </button>
+          </div>
+          <div class="path-offset-track">
+            <div class="path-offset-ticks" aria-hidden="true">
+              <span></span><span></span><span></span><span></span><span></span>
+            </div>
+            <input
+              type="range"
+              id="po-end-slider"
+              min="0"
+              max="1"
+              step="0.001"
+              value="0.5"
+              aria-label="End anchor offset"
+            />
+            <div class="path-offset-mixed-label" id="po-end-mixed" hidden>Mixed</div>
+          </div>
+        </div>
+
+        <div class="po-slider-col" id="po-between-row">
+          <div class="po-slider-head">
+            <span class="po-slider-label">Between offset</span>
+            <button
+              type="button"
+              class="path-offset-reset"
+              id="po-between-reset"
+              title="Reset between offset"
+              aria-label="Reset between offset"
+            >
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" width="12" height="12">
+                <path d="M3 12a9 9 0 1 0 3.2-6.9" />
+                <path d="M3 4v5h5" />
+              </svg>
+            </button>
+          </div>
+          <div class="path-offset-track">
+            <div class="path-offset-ticks" aria-hidden="true">
+              <span></span><span></span><span></span><span></span><span></span>
+            </div>
+            <input
+              type="range"
+              id="po-between-slider"
+              min="0"
+              max="1"
+              step="0.001"
+              value="0.5"
+              aria-label="Between (middle segment) offset"
+            />
+            <div class="path-offset-mixed-label" id="po-between-mixed" hidden>Mixed</div>
+          </div>
+        </div>
+      </div>
+    </section>
 
     <!-- Label section -->
-    <section class="section">
+    <section class="section accordion" data-accordion="label">
+      <button type="button" class="accordion-header" aria-expanded="true">
+        <span>Label</span>
+        <svg class="chev" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+          <polyline points="6 9 12 15 18 9"></polyline>
+        </svg>
+      </button>
+      <div class="accordion-body">
       <div class="row">
         <input
           type="text"
@@ -814,24 +1268,27 @@
           </span>
         </div>
       </div>
+      </div>
     </section>
 
     <!-- Presets -->
-    <section class="section preset-section">
-      <div class="preset-header">
-        <div class="preset-label">Presets</div>
-        <div class="preset-current" id="preset-current">Using: Custom</div>
+    <section class="section preset-section accordion" data-accordion="presets">
+      <button type="button" class="accordion-header" aria-expanded="true">
+        <span>Presets</span>
+        <span class="accordion-header-aux" id="preset-current">Using: Default</span>
+        <svg class="chev" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+          <polyline points="6 9 12 15 18 9"></polyline>
+        </svg>
+      </button>
+      <div class="accordion-body">
+      <!-- Dynamically populated by renderPresets() -->
+      <div class="preset-row" id="preset-row"></div>
+      <!-- Inline name form (shown when adding a preset) -->
+      <div class="preset-name-form" id="preset-name-form" style="display:none;">
+        <input type="text" id="preset-name-input" class="preset-name-input-field" placeholder="Preset name" maxlength="30" />
+        <button type="button" id="preset-name-confirm" class="preset-name-btn confirm" title="Confirm">✓</button>
+        <button type="button" id="preset-name-cancel" class="preset-name-btn cancel" title="Cancel">✕</button>
       </div>
-      <div class="preset-row">
-        <button class="preset-btn" data-preset="custom" type="button">
-          <span class="preset-swatch" id="preset-swatch-custom"></span><span>Custom</span>
-        </button>
-        <button class="preset-btn" data-preset="success" type="button">
-          <span class="preset-swatch" id="preset-swatch-success" style="background:#22c55e"></span><span>Success</span>
-        </button>
-        <button class="preset-btn" data-preset="error" type="button">
-          <span class="preset-swatch" id="preset-swatch-error" style="background:#ef4444"></span><span>Error</span>
-        </button>
       </div>
     </section>
 
@@ -877,8 +1334,22 @@
       let toName = '';
       let showDraftAnchors = false;
 
+      // Per-endpoint anchor offsets. 0.5 = center of edge; 0 = bottom/left;
+      // 1 = top/right (axis depends on which side the anchor sits on).
+      let startOffsetValue = 0.5;
+      let endOffsetValue = 0.5;
+      let betweenOffsetValue = 0.5;
+      let startOffsetMixed = false;
+      let endOffsetMixed = false;
+      let betweenOffsetMixed = false;
+      // Between slider is disabled when the path has no slidable middle
+      // segment (straight horizontal/vertical, or wrap-around routing).
+      let betweenOffsetSupported = true;
+
+      const BUILT_IN_PRESETS = ['default'];
+
       const DEFAULT_PRESETS = {
-        custom: JSON.parse(JSON.stringify(DEFAULTS)),
+        default: JSON.parse(JSON.stringify(DEFAULTS)),
         success: {
           strokeColor: '22c55e',
           opacity: 100,
@@ -890,7 +1361,7 @@
           endArrow: 'arrow',
           startAnchor: 'auto',
           endAnchor: 'auto',
-          label: Object.assign({}, DEFAULTS.label, { text: 'success', fontSize: 16 }),
+          label: Object.assign({}, DEFAULTS.label, { text: 'Success', fontSize: 16 }),
         },
         error: {
           strokeColor: 'ef4444',
@@ -906,47 +1377,9 @@
           label: Object.assign({}, DEFAULTS.label, { text: 'Error', fontSize: 16 }),
         },
       };
+
       let savedPresetStyles = JSON.parse(JSON.stringify(DEFAULT_PRESETS));
-      let activePreset = 'custom';
-
-      function buildPresets() {
-        return savedPresetStyles;
-      }
-
-      function applyPreset(name) {
-        const presets = buildPresets();
-        const p = presets[name];
-        if (!p) return;
-        activePreset = name;
-        state = cloneStyle(p);
-        applyStateToUi();
-        updatePresetUi();
-        emit();
-      }
-
-      function updatePresetSwatches() {
-        ['custom', 'success', 'error'].forEach((name) => {
-          const sw = document.getElementById('preset-swatch-' + name);
-          const style = savedPresetStyles[name];
-          if (sw && style) sw.style.background = '#' + style.strokeColor;
-        });
-      }
-
-      function presetLabel(name) {
-        if (name === 'success') return 'Success';
-        if (name === 'error') return 'Error';
-        return 'Custom';
-      }
-
-      function updatePresetUi() {
-        document.querySelectorAll('.preset-btn').forEach((btn) => {
-          const isActive = btn.dataset.preset === activePreset;
-          btn.classList.toggle('active', isActive);
-          btn.setAttribute('aria-pressed', String(isActive));
-        });
-        const current = $('preset-current');
-        if (current) current.textContent = 'Using: ' + presetLabel(activePreset);
-      }
+      let activePreset = 'default';
 
       // -----------------------------------------------------------------
       // Helpers
@@ -963,56 +1396,327 @@
         return next;
       }
 
+      function presetLabel(name) {
+        const labels = { default: 'Default', success: 'Success', error: 'Error' };
+        if (labels[name]) return labels[name];
+        return name;
+      }
+
+      // -----------------------------------------------------------------
+      // Preset normalization (handles legacy 'custom' → 'default' migration)
+      // -----------------------------------------------------------------
+
       function normalizePresetStyle(name, style) {
-        if (name === 'custom') return mergeStyle(DEFAULT_PRESETS.custom, style || {});
-        const next = cloneStyle(DEFAULT_PRESETS[name]);
-        const savedText = style && style.label && typeof style.label.text === 'string'
-          ? style.label.text.trim()
-          : '';
-        if (savedText) {
-          next.label.text = savedText;
-        }
-        return next;
+        const base = DEFAULT_PRESETS[name] || DEFAULTS;
+        if (!style) return cloneStyle(base);
+        return mergeStyle(base, style);
       }
 
       function normalizePresetStyles(styles) {
+        const src = Object.assign({}, styles);
+        // Migrate legacy 'custom' key to 'default'
+        if (src.custom && !src.default) {
+          src.default = src.custom;
+        }
+        delete src.custom;
+
         const next = {};
-        ['custom', 'success', 'error'].forEach((name) => {
-          next[name] = normalizePresetStyle(name, styles && styles[name]);
+        // Built-ins first (always present)
+        BUILT_IN_PRESETS.forEach((name) => {
+          next[name] = normalizePresetStyle(name, src[name]);
         });
+        // User presets
+        Object.keys(src)
+          .filter((n) => !BUILT_IN_PRESETS.includes(n))
+          .forEach((name) => {
+            next[name] = normalizePresetStyle(name, src[name]);
+          });
         return next;
       }
 
-      function savePresetStyle(name, style) {
-        savedPresetStyles[name] = normalizePresetStyle(name, style);
-        updatePresetSwatches();
+      // -----------------------------------------------------------------
+      // Preset rendering
+      // -----------------------------------------------------------------
+
+      function renderPresets() {
+        const row = $('preset-row');
+        if (!row) return;
+        row.innerHTML = '';
+
+        const allNames = [
+          ...BUILT_IN_PRESETS.filter((n) => savedPresetStyles[n]),
+          ...Object.keys(savedPresetStyles).filter((n) => !BUILT_IN_PRESETS.includes(n)),
+        ];
+
+        allNames.forEach((name) => {
+          const style = savedPresetStyles[name];
+          const isBuiltIn = BUILT_IN_PRESETS.includes(name);
+
+          const wrap = document.createElement('div');
+          wrap.className = 'preset-btn-wrap';
+
+          const btn = document.createElement('button');
+          btn.type = 'button';
+          btn.className = 'preset-btn';
+          btn.dataset.preset = name;
+          btn.setAttribute('aria-pressed', 'false');
+
+          const swatch = document.createElement('span');
+          swatch.className = 'preset-swatch';
+          swatch.style.background = '#' + (style ? style.strokeColor : '00eeff');
+
+          const lbl = document.createElement('span');
+          lbl.textContent = presetLabel(name);
+
+          btn.appendChild(swatch);
+          btn.appendChild(lbl);
+          btn.addEventListener('click', () => applyPreset(name));
+          wrap.appendChild(btn);
+
+          if (!isBuiltIn) {
+            const delBtn = document.createElement('button');
+            delBtn.type = 'button';
+            delBtn.className = 'preset-delete-btn';
+            delBtn.title = 'Delete "' + name + '"';
+            delBtn.textContent = '×';
+            delBtn.addEventListener('click', (e) => {
+              e.stopPropagation();
+              deletePreset(name);
+            });
+            wrap.appendChild(delBtn);
+          }
+
+          row.appendChild(wrap);
+        });
+
+        // "+ Add" button
+        const addBtn = document.createElement('button');
+        addBtn.type = 'button';
+        addBtn.className = 'preset-add-btn';
+        addBtn.id = 'preset-add-btn-dynamic';
+        addBtn.textContent = '+ Add';
+        addBtn.addEventListener('click', showAddPresetInput);
+        row.appendChild(addBtn);
+
         updatePresetUi();
+        scheduleResize();
+      }
+
+      function updatePresetUi() {
+        document.querySelectorAll('.preset-btn').forEach((btn) => {
+          const isActive = btn.dataset.preset === activePreset;
+          btn.classList.toggle('active', isActive);
+          btn.setAttribute('aria-pressed', String(isActive));
+        });
+        const current = $('preset-current');
+        if (current) current.textContent = 'Using: ' + presetLabel(activePreset);
+      }
+
+      function updatePresetSwatch(name) {
+        const style = savedPresetStyles[name];
+        if (!style) return;
+        document.querySelectorAll('.preset-btn[data-preset="' + name + '"] .preset-swatch').forEach((sw) => {
+          sw.style.background = '#' + style.strokeColor;
+        });
+      }
+
+      // -----------------------------------------------------------------
+      // Preset actions
+      // -----------------------------------------------------------------
+
+      function applyPreset(name) {
+        const p = savedPresetStyles[name];
+        if (!p) return;
+        activePreset = name;
+        // A preset is a visual style template (color, width, line type,
+        // arrows, label) — NOT routing. The user-aimed anchor sides and
+        // per-edge offsets describe where the line attaches to its frames,
+        // and switching the look of the line shouldn't reposition it.
+        // Preserve those fields across the swap.
+        const prevStartAnchor = state.startAnchor;
+        const prevEndAnchor = state.endAnchor;
+        state = cloneStyle(p);
+        state.startAnchor = prevStartAnchor;
+        state.endAnchor = prevEndAnchor;
+        applyStateToUi();
+        updatePresetUi();
+        emit();
+      }
+
+      function deletePreset(name) {
+        if (BUILT_IN_PRESETS.includes(name)) return;
+        delete savedPresetStyles[name];
+        if (activePreset === name) {
+          activePreset = 'default';
+          state = cloneStyle(savedPresetStyles['default'] || DEFAULTS);
+          applyStateToUi();
+        }
+        renderPresets();
+        post({ type: 'save-preset-styles', styles: savedPresetStyles });
+      }
+
+      function showAddPresetInput() {
+        const form = $('preset-name-form');
+        if (!form) return;
+        form.style.display = 'flex';
+        const input = $('preset-name-input');
+        let n = 1;
+        while (savedPresetStyles['Preset ' + n]) n++;
+        input.value = 'Preset ' + n;
+        input.focus();
+        input.select();
+        scheduleResize();
+      }
+
+      function hideAddPresetInput() {
+        const form = $('preset-name-form');
+        if (form) form.style.display = 'none';
+        scheduleResize();
+      }
+
+      function confirmAddPreset() {
+        const input = $('preset-name-input');
+        const name = (input ? input.value : '').trim();
+        if (!name) { hideAddPresetInput(); return; }
+        // Newly-created presets start from defaults (cyan) with no label,
+        // not from whatever the user happened to have on screen. Keeps
+        // "+ Add" predictable instead of capturing accidental state.
+        const fresh = cloneStyle(DEFAULTS);
+        fresh.label = Object.assign({}, DEFAULTS.label, { text: '' });
+        savedPresetStyles[name] = fresh;
+        activePreset = name;
+        // Preserve the user's current anchor selections — the new preset is
+        // a style template; the routing they've aimed shouldn't snap back
+        // to 'auto' just because they added a new color swatch.
+        const prevStartAnchor = state.startAnchor;
+        const prevEndAnchor = state.endAnchor;
+        state = cloneStyle(fresh);
+        state.startAnchor = prevStartAnchor;
+        state.endAnchor = prevEndAnchor;
+        applyStateToUi();
+        hideAddPresetInput();
+        renderPresets();
+        post({ type: 'save-preset-styles', styles: savedPresetStyles });
+        emit(true);
+      }
+
+      function savePresetStyle(name, style) {
+        savedPresetStyles[name] = cloneStyle(style);
+        updatePresetSwatch(name);
         post({ type: 'save-preset-styles', styles: savedPresetStyles });
       }
 
       function saveActivePresetStyle() {
-        savePresetStyle(activePreset || 'custom', state);
+        savePresetStyle(activePreset || 'default', state);
       }
 
       function post(msg) {
         parent.postMessage({ pluginMessage: msg }, '*');
       }
 
-      /** Match Figma panel height to document (no empty gap under content). */
+      /** Match Figma panel height to document (no empty gap under content).
+       *  We measure the bottom of the last visible child rather than the
+       *  documentElement: documentElement reflects the iframe's current size
+       *  (set by Figma's previous resize), so MAX-ing against it prevents
+       *  shrinking when accordions collapse. */
       let __resizeRaf = null;
       function scheduleResize() {
+        // Once the user takes manual control via the resize grip, auto-fit
+        // shouldn't fight back on every accordion toggle / selection change.
+        if (userHasResized) return;
         if (__resizeRaf != null) cancelAnimationFrame(__resizeRaf);
         __resizeRaf = requestAnimationFrame(() => {
           __resizeRaf = null;
-          const h = Math.ceil(
-            Math.max(
-              document.documentElement.getBoundingClientRect().height,
-              document.body.scrollHeight,
-            ),
-          );
+          let bottom = 0;
+          for (const el of document.body.children) {
+            if (el.id === 'resize-handle') continue;
+            if (el.offsetParent === null && getComputedStyle(el).position !== 'fixed') continue;
+            const rect = el.getBoundingClientRect();
+            if (rect.bottom > bottom) bottom = rect.bottom;
+          }
+          const h = Math.ceil(bottom);
           post({ type: 'resize-ui', height: h });
         });
       }
+
+      // -----------------------------------------------------------------
+      // Drag-to-resize (bottom-right grip)
+      // -----------------------------------------------------------------
+      // Bounds mirror the sandbox clamp in code.ts. Keep them in sync.
+      const MIN_W = 320, MAX_W = 720;
+      const MIN_H = 260, MAX_H = 1200;
+      const SIZE_KEY_W = 'easyflow.size.w';
+      const SIZE_KEY_H = 'easyflow.size.h';
+      let userHasResized = false;
+
+      function readSavedSize() {
+        try {
+          const w = parseInt(localStorage.getItem(SIZE_KEY_W) || '', 10);
+          const h = parseInt(localStorage.getItem(SIZE_KEY_H) || '', 10);
+          if (Number.isFinite(w) && Number.isFinite(h)) return { w, h };
+        } catch (_) {}
+        return null;
+      }
+      function saveSize(w, h) {
+        try {
+          localStorage.setItem(SIZE_KEY_W, String(w));
+          localStorage.setItem(SIZE_KEY_H, String(h));
+        } catch (_) {}
+      }
+      function applySavedSizeIfAny() {
+        const saved = readSavedSize();
+        if (!saved) return false;
+        userHasResized = true;
+        post({ type: 'resize-ui', width: saved.w, height: saved.h });
+        return true;
+      }
+
+      (function initResizeHandle() {
+        const grip = document.getElementById('resize-handle');
+        if (!grip) return;
+        let startX = 0, startY = 0, startW = 0, startH = 0;
+        let curW = 0, curH = 0;
+        let dragRaf = null;
+        let dragging = false;
+
+        function flushDrag() {
+          dragRaf = null;
+          post({ type: 'resize-ui', width: curW, height: curH });
+        }
+        function onMove(e) {
+          if (!dragging) return;
+          const dx = e.clientX - startX;
+          const dy = e.clientY - startY;
+          curW = Math.min(MAX_W, Math.max(MIN_W, Math.round(startW + dx)));
+          curH = Math.min(MAX_H, Math.max(MIN_H, Math.round(startH + dy)));
+          if (dragRaf == null) dragRaf = requestAnimationFrame(flushDrag);
+        }
+        function onUp() {
+          if (!dragging) return;
+          dragging = false;
+          document.documentElement.classList.remove('resizing');
+          window.removeEventListener('mousemove', onMove);
+          window.removeEventListener('mouseup', onUp);
+          if (dragRaf != null) { cancelAnimationFrame(dragRaf); dragRaf = null; }
+          saveSize(curW, curH);
+        }
+        grip.addEventListener('mousedown', (e) => {
+          e.preventDefault();
+          dragging = true;
+          startX = e.clientX;
+          startY = e.clientY;
+          // window.innerWidth/Height reflects the current iframe size, which
+          // is what Figma resized us to last — perfect baseline for the drag.
+          startW = window.innerWidth;
+          startH = window.innerHeight;
+          curW = startW;
+          curH = startH;
+          userHasResized = true;
+          document.documentElement.classList.add('resizing');
+          window.addEventListener('mousemove', onMove);
+          window.addEventListener('mouseup', onUp);
+        });
+      })();
 
       // Coalesce rapid input events (keystrokes, slider drags, color picker)
       // into one message per animation frame. Without this, dragging a slider
@@ -1061,10 +1765,49 @@
         renderAnchorDots();
         renderArrowPreviews();
         renderEndpointInfo();
+        applyPathOffsetUi();
         $('active-toggle').classList.toggle('on', active);
         document.body.classList.toggle('disabled', !active);
         suppressEmit = false;
         scheduleResize();
+      }
+
+      // Show / hide the Path Offset section. Visible whenever a flow (or
+      // flows) is selected. Per-slider "Mixed" overlay appears when a
+      // multi-select has differing values for that endpoint.
+      function applyPathOffsetUi() {
+        const section = $('path-offset-section');
+        if (!section) return;
+        const visible = mode === 'one-flow' || mode === 'multi-flow';
+        section.hidden = !visible;
+        if (!visible) return;
+
+        const startRow = $('po-start-row');
+        const endRow = $('po-end-row');
+        const betweenRow = $('po-between-row');
+        const startSlider = $('po-start-slider');
+        const endSlider = $('po-end-slider');
+        const betweenSlider = $('po-between-slider');
+        const startMixed = $('po-start-mixed');
+        const endMixed = $('po-end-mixed');
+        const betweenMixed = $('po-between-mixed');
+
+        startRow.classList.toggle('mixed', startOffsetMixed);
+        endRow.classList.toggle('mixed', endOffsetMixed);
+        betweenRow.classList.toggle('mixed', betweenOffsetMixed);
+        startMixed.hidden = !startOffsetMixed;
+        endMixed.hidden = !endOffsetMixed;
+        betweenMixed.hidden = !betweenOffsetMixed;
+        // Center the handle visually when mixed so it has a neutral starting
+        // point if the user grabs it.
+        startSlider.value = String(startOffsetMixed ? 0.5 : startOffsetValue);
+        endSlider.value = String(endOffsetMixed ? 0.5 : endOffsetValue);
+        betweenSlider.value = String(betweenOffsetMixed ? 0.5 : betweenOffsetValue);
+        // Disable the between slider for straight-line / wrap-around paths
+        // where there's no meaningful middle segment to slide.
+        betweenSlider.disabled = !betweenOffsetSupported;
+        betweenRow.classList.toggle('disabled', !betweenOffsetSupported);
+        $('po-between-reset').disabled = !betweenOffsetSupported;
       }
 
       function renderAnchorDots() {
@@ -1082,17 +1825,8 @@
       }
 
       function renderEndpointInfo() {
-        const info = $('endpoint-info');
         $('from-name').textContent = fromName || '';
         $('to-name').textContent = toName || '';
-        if (mode === 'one-flow' && (fromName || toName)) {
-          info.style.display = 'block';
-          const s = resolvedStartSide || state.startAnchor;
-          const e = resolvedEndSide || state.endAnchor;
-          info.innerHTML = `<b>${escapeHtml(fromName)}</b> · ${s} → ${e} · <b>${escapeHtml(toName)}</b>`;
-        } else {
-          info.style.display = 'none';
-        }
       }
 
       function escapeHtml(s) {
@@ -1111,7 +1845,6 @@
         if (t === 'arrow') head = `<path d="M34 7 L28 3 L28 11 Z" fill="currentColor"/>`;
         if (t === 'circle') head = `<circle cx="32" cy="7" r="4" fill="currentColor"/>`;
         if (t === 'diamond') head = `<path d="M32 3 L36 7 L32 11 L28 7 Z" fill="currentColor"/>`;
-        if (t === 'square') head = `<rect x="28" y="3" width="8" height="8" fill="currentColor"/>`;
         return `<svg width="48" height="14" viewBox="0 0 48 14" xmlns="http://www.w3.org/2000/svg"><g ${flip}><line x1="10" y1="7" x2="28" y2="7" stroke="currentColor" stroke-width="1.6"/>${head}</g></svg>`;
       }
 
@@ -1120,7 +1853,7 @@
         $('end-preview').innerHTML = arrowSvg(state.endArrow, false);
       }
 
-      const ARROW_CAP_VALUES = ['none', 'arrow', 'circle', 'diamond', 'square'];
+      const ARROW_CAP_VALUES = ['none', 'arrow', 'circle', 'diamond'];
 
       function closeArrowPickers() {
         document.querySelectorAll('.arrow-picker-panel').forEach((panel) => {
@@ -1233,9 +1966,6 @@
         $(pickerId).addEventListener('input', (e) => setVal(cleanHex(e.target.value)));
       }
       bindHex('stroke-color', 'stroke-color-picker', 'strokeColor');
-      document.querySelectorAll('.preset-btn').forEach((btn) => {
-        btn.addEventListener('click', () => applyPreset(btn.dataset.preset));
-      });
       bindHex('text-color', 'text-color-picker', 'color', 'label');
       bindHex('label-bg-color', 'label-bg-picker', 'background', 'label');
 
@@ -1271,14 +2001,41 @@
         dot.addEventListener('click', () => {
           const end = dot.dataset.end;
           const side = dot.dataset.side;
+          let resetSide = null;
           if (end === 'from') {
-            state.startAnchor = state.startAnchor === side ? 'auto' : side;
+            const next = state.startAnchor === side ? 'auto' : side;
+            if (next !== state.startAnchor) resetSide = 'start';
+            state.startAnchor = next;
           } else {
-            state.endAnchor = state.endAnchor === side ? 'auto' : side;
+            const next = state.endAnchor === side ? 'auto' : side;
+            if (next !== state.endAnchor) resetSide = 'end';
+            state.endAnchor = next;
+          }
+          // Switching the anchor side rotates the offset axis (Y↔X) so the
+          // stored offset becomes meaningless for the new edge. Reset that
+          // side to 0.5 so the slider stays in sync with what the user sees.
+          if (resetSide === 'start') {
+            startOffsetValue = 0.5;
+            clearStartMixed();
+          } else if (resetSide === 'end') {
+            endOffsetValue = 0.5;
+            clearEndMixed();
           }
           showDraftAnchors = true;
           renderAnchorDots();
-          emit();
+          if (resetSide && (mode === 'one-flow' || mode === 'multi-flow')) {
+            applyPathOffsetUi();
+            const reset = {};
+            reset.type = 'update-anchor-offsets';
+            if (resetSide === 'start') reset.startOffset = 0.5;
+            if (resetSide === 'end') reset.endOffset = 0.5;
+            post(reset);
+          }
+          // Send the anchor side change immediately (not via rAF). The
+          // anchor side is a deliberate user gesture, not a continuous
+          // value, so coalescing it can let it lose to other in-flight
+          // messages and leave the meta out of sync with the panel.
+          emit(true);
         });
       });
 
@@ -1302,6 +2059,113 @@
         }
       });
 
+      // ---- Anchor offset sliders -----------------------------------------
+      // Coalesce drags into one message per animation frame: native range
+      // input can fire >30 events/sec which would each trigger a full
+      // setVectorNetworkAsync cycle in the sandbox.
+      let __offsetRaf = null;
+      let __pendingStart = null;
+      let __pendingEnd = null;
+      let __pendingBetween = null;
+      function flushAnchorOffsets() {
+        __offsetRaf = null;
+        const payload = { type: 'update-anchor-offsets' };
+        if (__pendingStart !== null) payload.startOffset = __pendingStart;
+        if (__pendingEnd !== null) payload.endOffset = __pendingEnd;
+        if (__pendingBetween !== null) payload.betweenOffset = __pendingBetween;
+        __pendingStart = null;
+        __pendingEnd = null;
+        __pendingBetween = null;
+        post(payload);
+      }
+      function scheduleAnchorOffsetPost() {
+        if (__offsetRaf != null) return;
+        __offsetRaf = requestAnimationFrame(flushAnchorOffsets);
+      }
+      function clearStartMixed() {
+        if (!startOffsetMixed) return;
+        startOffsetMixed = false;
+        $('po-start-row').classList.remove('mixed');
+        $('po-start-mixed').hidden = true;
+      }
+      function clearEndMixed() {
+        if (!endOffsetMixed) return;
+        endOffsetMixed = false;
+        $('po-end-row').classList.remove('mixed');
+        $('po-end-mixed').hidden = true;
+      }
+      function clearBetweenMixed() {
+        if (!betweenOffsetMixed) return;
+        betweenOffsetMixed = false;
+        $('po-between-row').classList.remove('mixed');
+        $('po-between-mixed').hidden = true;
+      }
+      $('po-start-slider').addEventListener('input', (e) => {
+        const v = parseFloat(e.target.value);
+        if (!Number.isFinite(v)) return;
+        startOffsetValue = v;
+        clearStartMixed();
+        __pendingStart = v;
+        scheduleAnchorOffsetPost();
+      });
+      $('po-end-slider').addEventListener('input', (e) => {
+        const v = parseFloat(e.target.value);
+        if (!Number.isFinite(v)) return;
+        endOffsetValue = v;
+        clearEndMixed();
+        __pendingEnd = v;
+        scheduleAnchorOffsetPost();
+      });
+      $('po-between-slider').addEventListener('input', (e) => {
+        const v = parseFloat(e.target.value);
+        if (!Number.isFinite(v)) return;
+        betweenOffsetValue = v;
+        clearBetweenMixed();
+        __pendingBetween = v;
+        scheduleAnchorOffsetPost();
+      });
+      $('po-start-reset').addEventListener('click', () => {
+        startOffsetValue = 0.5;
+        clearStartMixed();
+        $('po-start-slider').value = '0.5';
+        if (__offsetRaf != null) {
+          cancelAnimationFrame(__offsetRaf);
+          __offsetRaf = null;
+        }
+        __pendingStart = null;
+        post({ type: 'update-anchor-offsets', startOffset: 0.5 });
+      });
+      $('po-end-reset').addEventListener('click', () => {
+        endOffsetValue = 0.5;
+        clearEndMixed();
+        $('po-end-slider').value = '0.5';
+        if (__offsetRaf != null) {
+          cancelAnimationFrame(__offsetRaf);
+          __offsetRaf = null;
+        }
+        __pendingEnd = null;
+        post({ type: 'update-anchor-offsets', endOffset: 0.5 });
+      });
+      $('po-between-reset').addEventListener('click', () => {
+        betweenOffsetValue = 0.5;
+        clearBetweenMixed();
+        $('po-between-slider').value = '0.5';
+        if (__offsetRaf != null) {
+          cancelAnimationFrame(__offsetRaf);
+          __offsetRaf = null;
+        }
+        __pendingBetween = null;
+        post({ type: 'update-anchor-offsets', betweenOffset: 0.5 });
+      });
+
+      // Preset name form
+      $('preset-name-confirm').addEventListener('click', confirmAddPreset);
+      $('preset-name-cancel').addEventListener('click', hideAddPresetInput);
+      $('preset-name-input').addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') confirmAddPreset();
+        if (e.key === 'Escape') hideAddPresetInput();
+      });
+
       // -----------------------------------------------------------------
       // Sandbox messages
       // -----------------------------------------------------------------
@@ -1316,37 +2180,101 @@
           resolvedEndSide = msg.resolvedEndSide || null;
           fromName = msg.fromName || '';
           toName = msg.toName || '';
+          // Brush model: don't sync VISUAL style fields (color, stroke,
+          // arrows, label) from the selected flow — the panel keeps the
+          // user's last-set brush. But DO sync structural fields that
+          // describe where the flow connects (anchor sides). Without this,
+          // clicking the same anchor dot the brush already has pinned
+          // toggles it off when the user expected to pin it.
           if (msg.style) {
-            // Backfill any missing fields from defaults so old flows still work.
-            state = Object.assign(JSON.parse(JSON.stringify(DEFAULTS)), msg.style);
-            state.label = Object.assign({}, DEFAULTS.label, msg.style.label || {});
+            state.startAnchor = msg.style.startAnchor || 'auto';
+            state.endAnchor = msg.style.endAnchor || 'auto';
           }
+          startOffsetValue =
+            typeof msg.startOffset === 'number' ? msg.startOffset : 0.5;
+          endOffsetValue =
+            typeof msg.endOffset === 'number' ? msg.endOffset : 0.5;
+          betweenOffsetValue =
+            typeof msg.betweenOffset === 'number' ? msg.betweenOffset : 0.5;
+          startOffsetMixed = !!msg.startOffsetMixed;
+          endOffsetMixed = !!msg.endOffsetMixed;
+          betweenOffsetMixed = !!msg.betweenOffsetMixed;
+          // Default to supported when the sandbox didn't report it (e.g.
+          // initial load before a flow is selected) so the slider isn't
+          // perma-disabled — applyPathOffsetUi only uses this flag when
+          // the path-offset section is visible.
+          betweenOffsetSupported = msg.betweenOffsetSupported !== false;
           applyStateToUi();
           updatePresetUi();
           scheduleResize();
+        } else if (msg.type === 'between-support') {
+          // Only the disabled state changed — avoid the full
+          // applyPathOffsetUi() pass which would write back to every
+          // slider's .value (and snap the one the user is actively
+          // dragging back to a sandbox echo). Toggle just the Between
+          // row's controls in place.
+          betweenOffsetSupported = !!msg.supported;
+          const betweenSlider = $('po-between-slider');
+          const betweenReset = $('po-between-reset');
+          const betweenRow = $('po-between-row');
+          if (betweenSlider && betweenReset && betweenRow) {
+            betweenSlider.disabled = !betweenOffsetSupported;
+            betweenReset.disabled = !betweenOffsetSupported;
+            betweenRow.classList.toggle('disabled', !betweenOffsetSupported);
+          }
         } else if (msg.type === 'preset-styles') {
           savedPresetStyles = normalizePresetStyles(msg.styles || {});
           if (mode !== 'one-flow' && mode !== 'multi-flow') {
-            state = cloneStyle(savedPresetStyles.custom);
+            state = cloneStyle(savedPresetStyles['default'] || savedPresetStyles.default || DEFAULTS);
             applyStateToUi();
           }
-          updatePresetSwatches();
-          updatePresetUi();
+          renderPresets();
         }
       });
+
+      // -----------------------------------------------------------------
+      // Accordion state — persist collapsed/open per-section via localStorage.
+      // First-time use (no saved key) leaves all sections open.
+      // -----------------------------------------------------------------
+      function setAccordionOpen(acc, open) {
+        acc.classList.toggle('collapsed', !open);
+        const header = acc.querySelector('.accordion-header');
+        if (header) header.setAttribute('aria-expanded', open ? 'true' : 'false');
+      }
+      function initAccordions() {
+        document.querySelectorAll('.accordion').forEach((acc) => {
+          const key = 'easyflow.acc.' + acc.dataset.accordion;
+          let saved = null;
+          try { saved = localStorage.getItem(key); } catch (_) {}
+          const isOpen = saved === null ? true : saved === '1';
+          setAccordionOpen(acc, isOpen);
+          const header = acc.querySelector('.accordion-header');
+          if (!header) return;
+          header.addEventListener('click', () => {
+            const next = acc.classList.contains('collapsed');
+            setAccordionOpen(acc, next);
+            try { localStorage.setItem(key, next ? '1' : '0'); } catch (_) {}
+            scheduleResize();
+          });
+        });
+      }
 
       // -----------------------------------------------------------------
       // Init
       // -----------------------------------------------------------------
       initArrowPickers();
-      updatePresetSwatches();
-      updatePresetUi();
+      initAccordions();
+      renderPresets();
       applyStateToUi();
+      // Restore the user's last manual size if they previously dragged the
+      // grip — this also sets userHasResized so scheduleResize() bails out
+      // and the auto-fit ResizeObserver doesn't fight the restored size.
+      const hadSavedSize = applySavedSizeIfAny();
       try {
         new ResizeObserver(() => scheduleResize()).observe(document.documentElement);
       } catch (_) {}
       post({ type: 'ui-ready' });
-      scheduleResize();
+      if (!hadSavedSize) scheduleResize();
     </script>
   </body>
 </html>
