@@ -2,7 +2,7 @@
 // Build marker — bump on every behaviour change so the user can verify
 // Figma actually loaded the latest dist (Figma aggressively caches
 // development plugins; older bundles persist across reloads).
-console.log('[EasyFlow] build 2026-06-22-batch-uuid-heal loaded');
+console.log('[EasyFlow] build 2026-06-25-preserve-manual-style loaded');
 
 // Safety net: any rejection that escapes a handler (e.g. a getPluginData
 // throw on a node Figma silently deleted) shouldn't crash the plugin or
@@ -537,7 +537,8 @@ async function handleUpdateAnchorOffsets(
     if (eClamp !== undefined) next.endOffset = eClamp;
     if (bClamp !== undefined) next.betweenOffset = bClamp;
     writeMeta(flow, next);
-    void enqueueRender(flow, next);
+    // Offsets only move geometry — preserve any visual edits the user made.
+    void enqueueRender(flow, next, true);
   }
   // If start/end moved, the path may have transitioned between
   // straight ↔ bent shapes — push just the Between slider's enabled
@@ -589,7 +590,12 @@ async function postBetweenSupportFromSelection(): Promise<void> {
 // ---------------------------------------------------------------------------
 
 const renderInFlight = new Set<string>();
-const renderPending = new Map<string, FlowMeta>();
+// preserveVisual: true when this render is geometry-only (a frame moved or an
+// anchor offset changed) and must NOT re-impose meta's stroke/colour/dash/caps,
+// so manual edits the user made to the line in Figma survive. False for
+// deliberate style changes from the panel (and at creation), which DO apply
+// meta's visual style.
+const renderPending = new Map<string, { meta: FlowMeta; preserveVisual: boolean }>();
 // (lastRenderHash is declared with the reverse indices near the top — it has
 // to exist before the synchronous bootstrap call, which now reaches it.)
 function renderInputHash(meta: FlowMeta, fromBox: Box, toBox: Box): string {
@@ -605,20 +611,25 @@ function renderInputHash(meta: FlowMeta, fromBox: Box, toBox: Box): string {
   ]);
 }
 
-async function enqueueRender(node: SceneNode, meta: FlowMeta): Promise<void> {
+async function enqueueRender(node: SceneNode, meta: FlowMeta, preserveVisual = false): Promise<void> {
   const id = node.id;
   if (renderInFlight.has(id)) {
-    renderPending.set(id, meta);
+    // Coalesce: a pending render only stays visual-preserving if BOTH the
+    // queued and the incoming render are — a style change in either direction
+    // must still apply meta's visual.
+    const prev = renderPending.get(id);
+    const merged = prev ? prev.preserveVisual && preserveVisual : preserveVisual;
+    renderPending.set(id, { meta, preserveVisual: merged });
     return;
   }
   renderInFlight.add(id);
   try {
-    await renderFlow(node, meta);
+    await renderFlow(node, meta, preserveVisual);
     while (renderPending.has(id)) {
       const next = renderPending.get(id)!;
       renderPending.delete(id);
       if (node.removed) break;
-      await renderFlow(node, next);
+      await renderFlow(node, next.meta, next.preserveVisual);
     }
   } finally {
     renderInFlight.delete(id);
@@ -758,17 +769,19 @@ async function syncFlowLabel(vec: VectorNode, meta: FlowMeta, midAbs: Point): Pr
   return { ...meta, labelNodeId: created.id };
 }
 
-async function renderFlow(node: SceneNode, meta: FlowMeta): Promise<void> {
+async function renderFlow(node: SceneNode, meta: FlowMeta, preserveVisual = false): Promise<void> {
   if (node.type === 'VECTOR') {
-    await renderVectorFlow(node, meta);
+    await renderVectorFlow(node, meta, preserveVisual);
     return;
   }
   if (node.type === 'FRAME' && readMeta(node)) {
+    // Legacy frame flows rebuild their children from scratch on every render,
+    // so there's no in-place visual to preserve — they always re-apply meta.
     await renderLegacyFrameFlow(node as FrameNode, meta);
   }
 }
 
-async function renderVectorFlow(vec: VectorNode, meta: FlowMeta): Promise<void> {
+async function renderVectorFlow(vec: VectorNode, meta: FlowMeta, preserveVisual = false): Promise<void> {
   let fromNode = await figma.getNodeByIdAsync(meta.fromNodeId) as SceneNode | null;
   let toNode = await figma.getNodeByIdAsync(meta.toNodeId) as SceneNode | null;
   if (!fromNode || !toNode || fromNode.removed || toNode.removed) {
@@ -823,8 +836,18 @@ async function renderVectorFlow(vec: VectorNode, meta: FlowMeta): Promise<void> 
   const startPoint = pointOnSide(fromBox, startSide, meta.startOffset ?? DEFAULT_ANCHOR_OFFSET);
   const endPoint = pointOnSide(toBox, endSide, meta.endOffset ?? DEFAULT_ANCHOR_OFFSET);
 
-  const capS = arrowTypeToStrokeCap(meta.startArrow);
-  const capE = arrowTypeToStrokeCap(meta.endArrow);
+  let capS: StrokeCap;
+  let capE: StrokeCap;
+  if (preserveVisual) {
+    // Geometry-only re-render: keep the end caps the line currently has (the
+    // user may have changed them in Figma) rather than forcing meta's arrows.
+    const verts = vec.vectorNetwork?.vertices;
+    capS = verts && verts.length > 0 ? (verts[0].strokeCap ?? 'NONE') : arrowTypeToStrokeCap(meta.startArrow);
+    capE = verts && verts.length > 0 ? (verts[verts.length - 1].strokeCap ?? 'NONE') : arrowTypeToStrokeCap(meta.endArrow);
+  } else {
+    capS = arrowTypeToStrokeCap(meta.startArrow);
+    capE = arrowTypeToStrokeCap(meta.endArrow);
+  }
 
   let vertices: VectorVertex[] = [];
   let segments: VectorSegment[] = [];
@@ -875,18 +898,22 @@ async function renderVectorFlow(vec: VectorNode, meta: FlowMeta): Promise<void> 
   vec.y = minY;
   vec.name = flowName(meta.label.text);
 
-  const strokePaint: Paint = {
-    type: 'SOLID',
-    color: hexToRgb(meta.strokeColor),
-    opacity: meta.opacity / 100,
-  };
-  vec.strokes = [strokePaint];
-  vec.strokeWeight = meta.strokeWidth;
-  vec.strokeAlign = 'CENTER';
-  vec.strokeJoin = 'ROUND';
-  vec.dashPattern =
-    meta.strokeStyle === 'dashed' ? [meta.strokeWidth * 2, meta.strokeWidth * 2] : [];
-  vec.fills = [];
+  if (!preserveVisual) {
+    // Apply meta's visual style. Skipped on geometry-only re-renders so a
+    // frame move never overwrites stroke/colour/dash the user set in Figma.
+    const strokePaint: Paint = {
+      type: 'SOLID',
+      color: hexToRgb(meta.strokeColor),
+      opacity: meta.opacity / 100,
+    };
+    vec.strokes = [strokePaint];
+    vec.strokeWeight = meta.strokeWidth;
+    vec.strokeAlign = 'CENTER';
+    vec.strokeJoin = 'ROUND';
+    vec.dashPattern =
+      meta.strokeStyle === 'dashed' ? [meta.strokeWidth * 2, meta.strokeWidth * 2] : [];
+    vec.fills = [];
+  }
 
   // setVectorNetworkAsync replaces the underlying network; the previous
   // `vec.vectorPaths = []` write was redundant and forced an extra commit.
@@ -1226,7 +1253,8 @@ async function rerenderFlowsForEndpointIds(endpointIds: Set<string>): Promise<vo
     if (node.type !== 'VECTOR' && node.type !== 'FRAME') continue;
     const meta = readMeta(node);
     if (!meta) continue;
-    void enqueueRender(node, meta);
+    // A frame moved → reposition only; never re-impose meta's visual style.
+    void enqueueRender(node, meta, true);
   }
 }
 
