@@ -2,7 +2,7 @@
 // Build marker — bump on every behaviour change so the user can verify
 // Figma actually loaded the latest dist (Figma aggressively caches
 // development plugins; older bundles persist across reloads).
-console.log('[EasyFlow] build 2026-06-25-preserve-manual-style loaded');
+console.log('[EasyFlow] build 2026-06-26-delete-label-with-flow loaded');
 
 // Safety net: any rejection that escapes a handler (e.g. a getPluginData
 // throw on a node Figma silently deleted) shouldn't crash the plugin or
@@ -70,6 +70,10 @@ figma.showUI(__html__, { width: 368, height: 560, themeColors: true });
 
 let active = true;
 let lastStyle: FlowStyle = clone(DEFAULT_STYLE);
+// When false (default), a newly created flow starts with an empty label rather
+// than inheriting the brush's last label text. The UI owns the persisted
+// preference and pushes it via 'set-remember-label'.
+let rememberLabel = false;
 
 // Track the previous selection so we can determine direction (start → end).
 let lastSelectionIds: string[] = figma.currentPage.selection.map((n) => n.id);
@@ -196,17 +200,20 @@ async function onSelectionChangedAsync(): Promise<void> {
     && sel[0].id !== sel[1].id
     && sel.every(isConnectableNode)
     && sel.every((n) => readMeta(n) === null)) {
-    const existing = await findFlowBetween(sel[0].id, sel[1].id);
-    if (existing) {
-      figma.currentPage.selection = [existing];
-      return;
-    }
+    // Resolve direction first (the previously-selected frame is the start),
+    // then dedupe only against a flow running THIS way. A→B and B→A are
+    // distinct connectors, so B→A must still be creatable when A→B exists.
     let startNode: SceneNode = sel[0];
     let endNode: SceneNode = sel[1];
     if (previousIds.length === 1) {
       const s = sel.find((n) => n.id === previousIds[0]);
       const e = sel.find((n) => n.id !== previousIds[0]);
       if (s && e) { startNode = s; endNode = e; }
+    }
+    const existing = await findFlowInDirection(startNode.id, endNode.id);
+    if (existing) {
+      figma.currentPage.selection = [existing];
+      return;
     }
     void createAndSelectFlow(startNode, endNode);
     return;
@@ -221,19 +228,32 @@ async function createAndSelectFlow(from: SceneNode, to: SceneNode): Promise<void
   // inheriting whatever the user last pinned on a previous flow.
   // Explicitly seed offsets to center so a freshly created flow can never
   // inherit a non-default value (UI also resets sliders on selection sync).
+  // If a connector already runs between these two frames (e.g. the reverse
+  // direction), shift this one to a different track on both edges so the two
+  // run parallel instead of stacking on top of each other. The user can still
+  // fine-tune with the offset sliders afterwards.
+  const track = offsetTrackForIndex(countFlowsBetween(from.id, to.id));
   const meta: FlowMeta = {
     ...clone(lastStyle),
     startAnchor: 'auto',
     endAnchor: 'auto',
     fromNodeId: from.id,
     toNodeId: to.id,
-    startOffset: DEFAULT_ANCHOR_OFFSET,
-    endOffset: DEFAULT_ANCHOR_OFFSET,
+    startOffset: track,
+    endOffset: track,
     betweenOffset: DEFAULT_BETWEEN_OFFSET,
   };
+  // Unless the user opted to remember it, a new flow shouldn't inherit the
+  // brush's label text — start blank so each connector gets its own label.
+  // Also clear it from the brush and the panel input so nothing lingers.
+  if (!rememberLabel) {
+    meta.label.text = '';
+    lastStyle.label.text = '';
+  }
   try {
     const flow = await createFlow(meta);
     figma.currentPage.selection = [flow];
+    if (!rememberLabel) figma.ui.postMessage({ type: 'reset-label' } as PluginToUi);
     // selectionchange will fire → syncUi runs automatically.
     // Now that at least one flow exists, ensure documentchange is wired
     // up so future endpoint moves rerender it.
@@ -255,6 +275,9 @@ figma.ui.onmessage = async (msg: UiToPlugin) => {
       break;
     case 'set-active':
       active = msg.active;
+      break;
+    case 'set-remember-label':
+      rememberLabel = msg.on;
       break;
     case 'create-flow':
       lastStyle = msg.style;
@@ -1045,6 +1068,10 @@ function queueFlowRerenderEndpointsFromChanges(event: DocumentChangeEvent): void
       // flowToEndpoints reverse map.
       if (flowToEndpoints.has(change.id)) {
         unindexFlow(change.id);
+        // The label is a separate sibling node, and selection-promotion
+        // collapses a marquee over [flow, label] down to just the flow — so a
+        // delete removes the line but strands the label. Remove it too.
+        void removeLabelsOwnedBy(change.id);
       }
       // Was this a label node?
       const ownerFlowId = labelToFlow.get(change.id);
@@ -1394,20 +1421,53 @@ function isConnectableNode(node: SceneNode): boolean {
   }
 }
 
-async function findFlowBetween(idA: string, idB: string): Promise<SceneNode | null> {
-  // Use the reverse index — intersect flow sets for both endpoints, then
-  // confirm direction-agnostic match via meta. O(min(|A|,|B|)) instead of
-  // a full-page findAll.
+/** How many flows already connect this pair of frames, in either direction.
+ *  Synchronous: reads true endpoints from flowToEndpoints (not ancestor keys),
+ *  so it never has to fetch nodes. Used to pick a non-overlapping track for a
+ *  newly created flow. */
+function countFlowsBetween(idA: string, idB: string): number {
   const setA = endpointToFlows.get(idA);
-  if (!setA || setA.size === 0) return null;
   const setB = endpointToFlows.get(idB);
+  if (!setA || !setB) return 0;
+  const [small, large] = setA.size <= setB.size ? [setA, setB] : [setB, setA];
+  let count = 0;
+  for (const fid of small) {
+    if (!large.has(fid)) continue;
+    const eps = flowToEndpoints.get(fid);
+    if (!eps) continue;
+    const [f, t] = eps;
+    if ((f === idA && t === idB) || (f === idB && t === idA)) count++;
+  }
+  return count;
+}
+
+/** Anchor-offset track for the n-th flow between a pair of frames. The first
+ *  (index 0) stays centred; later ones fan out to alternating sides of centre
+ *  so reverse/parallel connectors don't overlap. Clamped to stay on the edge. */
+function offsetTrackForIndex(index: number): number {
+  if (index <= 0) return DEFAULT_ANCHOR_OFFSET;
+  const step = Math.ceil(index / 2);           // 1,1,2,2,3,3,…
+  const dir = index % 2 === 1 ? 1 : -1;        // +,−,+,−,…
+  return Math.max(0.1, Math.min(0.9, DEFAULT_ANCHOR_OFFSET + dir * 0.2 * step));
+}
+
+async function findFlowInDirection(fromId: string, toId: string): Promise<SceneNode | null> {
+  // Use the reverse index — intersect flow sets for both endpoints, then
+  // confirm the match runs from→to via meta. The meta check also discards
+  // candidates where fromId/toId is merely an ANCESTOR of the real endpoint
+  // (the index keys ancestors too). Direction-specific, so A→B and B→A coexist.
+  // O(min(|A|,|B|)) instead of a full-page findAll.
+  const setA = endpointToFlows.get(fromId);
+  if (!setA || setA.size === 0) return null;
+  const setB = endpointToFlows.get(toId);
   if (!setB || setB.size === 0) return null;
   const [small, large] = setA.size <= setB.size ? [setA, setB] : [setB, setA];
   for (const fid of small) {
     if (!large.has(fid)) continue;
     const node = await figma.getNodeByIdAsync(fid) as SceneNode | null;
     if (!node || node.removed) { unindexFlow(fid); continue; }
-    return node;
+    const meta = readMeta(node);
+    if (meta && meta.fromNodeId === fromId && meta.toNodeId === toId) return node;
   }
   return null;
 }

@@ -89,6 +89,9 @@ export const DEFAULT_STYLE: FlowStyle = {
 export type UiToPlugin =
   | { type: 'ui-ready' }
   | { type: 'set-active'; active: boolean }
+  /** When false (the default), a newly created flow starts with an empty label
+   *  instead of inheriting the last-used label text. */
+  | { type: 'set-remember-label'; on: boolean }
   | { type: 'create-flow'; style: FlowStyle }
   | { type: 'update-style'; style: FlowStyle }
   | { type: 'swap-direction' }
@@ -129,6 +132,9 @@ export type PluginToUi =
     }
   | { type: 'notify'; message: string }
   | { type: 'preset-styles'; styles: PresetStyles }
+  /** Tell the panel to clear its label input — sent after a flow is created
+   *  while "remember label" is off, so the text doesn't linger for the next one. */
+  | { type: 'reset-label' }
   /** Lightweight update for the Between slider's enabled state — sent
    *  while the user drags Start/End sliders, since changing those
    *  values can transition the path between straight and bent shapes.
