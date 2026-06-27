@@ -393,7 +393,25 @@ export function pathMidpoint(
     };
   }
   const pts = computeStepWaypoints(p1, s1, p2, s2, padding, toBox, fromBox, between);
-  return waypointMidpoint(pts);
+  return labelAnchorPoint(pts);
+}
+
+/** Where the flow's label sits on a step path:
+ *  - straight line (1 segment)         → its centre
+ *  - L-shape (2 segments / one corner) → centre of the more-horizontal leg
+ *  - Z-shape or more (3+ segments)     → centre of the middle ("between") segment
+ *  Keeps the label off the corners and on the segment a reader expects. */
+function labelAnchorPoint(pts: Point[]): Point {
+  const n = pts.length;
+  if (n <= 2) return midpoint(pts[0], pts[n - 1]);
+  const segCount = n - 1;
+  if (segCount === 2) {
+    const dx0 = Math.abs(pts[1].x - pts[0].x);
+    const dx1 = Math.abs(pts[2].x - pts[1].x);
+    return dx0 >= dx1 ? midpoint(pts[0], pts[1]) : midpoint(pts[1], pts[2]);
+  }
+  const mid = Math.floor(segCount / 2);
+  return midpoint(pts[mid], pts[mid + 1]);
 }
 
 // ---------------------------------------------------------------------------

@@ -2,7 +2,7 @@
 // Build marker — bump on every behaviour change so the user can verify
 // Figma actually loaded the latest dist (Figma aggressively caches
 // development plugins; older bundles persist across reloads).
-console.log('[EasyFlow] build 2026-06-22-batch-uuid-heal loaded');
+console.log('[EasyFlow] build 2026-06-26-label-midsegment loaded');
 
 // Safety net: any rejection that escapes a handler (e.g. a getPluginData
 // throw on a node Figma silently deleted) shouldn't crash the plugin or
@@ -37,6 +37,7 @@ import {
   DEFAULT_STYLE,
   FLOW_NAME_PREFIX,
   PLUGIN_DATA_KEY,
+  type Anchor,
   type ArrowType,
   type FlowMeta,
   type FlowStyle,
@@ -70,6 +71,10 @@ figma.showUI(__html__, { width: 368, height: 560, themeColors: true });
 
 let active = true;
 let lastStyle: FlowStyle = clone(DEFAULT_STYLE);
+// When false (default), a newly created flow starts with an empty label rather
+// than inheriting the brush's last label text. The UI owns the persisted
+// preference and pushes it via 'set-remember-label'.
+let rememberLabel = false;
 
 // Track the previous selection so we can determine direction (start → end).
 let lastSelectionIds: string[] = figma.currentPage.selection.map((n) => n.id);
@@ -196,17 +201,31 @@ async function onSelectionChangedAsync(): Promise<void> {
     && sel[0].id !== sel[1].id
     && sel.every(isConnectableNode)
     && sel.every((n) => readMeta(n) === null)) {
-    const existing = await findFlowBetween(sel[0].id, sel[1].id);
-    if (existing) {
-      figma.currentPage.selection = [existing];
-      return;
-    }
+    // Resolve direction first (the previously-selected frame is the start),
+    // then dedupe only against a flow running THIS way. A→B and B→A are
+    // distinct connectors, so B→A must still be creatable when A→B exists.
     let startNode: SceneNode = sel[0];
     let endNode: SceneNode = sel[1];
     if (previousIds.length === 1) {
       const s = sel.find((n) => n.id === previousIds[0]);
       const e = sel.find((n) => n.id !== previousIds[0]);
       if (s && e) { startNode = s; endNode = e; }
+    }
+    const existing = await findFlowInDirection(startNode.id, endNode.id);
+    if (existing) {
+      // Re-connecting an already-linked pair makes no new line, but if the
+      // active preset remembers a label the user expects it to land here — so
+      // stamp the remembered label (text + style) onto the existing connector.
+      if (rememberLabel && lastStyle.label.text) {
+        const meta = readMeta(existing);
+        if (meta && meta.label.text !== lastStyle.label.text) {
+          const next: FlowMeta = { ...meta, label: { ...lastStyle.label } };
+          writeMeta(existing, next);
+          void enqueueRender(existing, next);
+        }
+      }
+      figma.currentPage.selection = [existing];
+      return;
     }
     void createAndSelectFlow(startNode, endNode);
     return;
@@ -221,19 +240,32 @@ async function createAndSelectFlow(from: SceneNode, to: SceneNode): Promise<void
   // inheriting whatever the user last pinned on a previous flow.
   // Explicitly seed offsets to center so a freshly created flow can never
   // inherit a non-default value (UI also resets sliders on selection sync).
+  // If a connector already runs between these two frames (e.g. the reverse
+  // direction), shift this one to a different track on both edges so the two
+  // run parallel instead of stacking on top of each other. The user can still
+  // fine-tune with the offset sliders afterwards.
+  const track = offsetTrackForIndex(countFlowsBetween(from.id, to.id));
   const meta: FlowMeta = {
     ...clone(lastStyle),
     startAnchor: 'auto',
     endAnchor: 'auto',
     fromNodeId: from.id,
     toNodeId: to.id,
-    startOffset: DEFAULT_ANCHOR_OFFSET,
-    endOffset: DEFAULT_ANCHOR_OFFSET,
+    startOffset: track,
+    endOffset: track,
     betweenOffset: DEFAULT_BETWEEN_OFFSET,
   };
+  // When the active preset remembers, a new flow inherits the brush's label;
+  // otherwise it starts blank and the brush text + panel input are cleared so a
+  // one-off label doesn't linger.
+  if (!rememberLabel) {
+    meta.label.text = '';
+    lastStyle.label.text = '';
+  }
   try {
     const flow = await createFlow(meta);
     figma.currentPage.selection = [flow];
+    if (!rememberLabel) figma.ui.postMessage({ type: 'reset-label' } as PluginToUi);
     // selectionchange will fire → syncUi runs automatically.
     // Now that at least one flow exists, ensure documentchange is wired
     // up so future endpoint moves rerender it.
@@ -256,6 +288,9 @@ figma.ui.onmessage = async (msg: UiToPlugin) => {
     case 'set-active':
       active = msg.active;
       break;
+    case 'set-remember-label':
+      rememberLabel = msg.on;
+      break;
     case 'create-flow':
       lastStyle = msg.style;
       await handleCreateOrUpdate(msg.style);
@@ -266,6 +301,9 @@ figma.ui.onmessage = async (msg: UiToPlugin) => {
       break;
     case 'swap-direction':
       await handleSwap();
+      break;
+    case 'update-anchors':
+      await handleUpdateAnchors(msg.startAnchor, msg.endAnchor);
       break;
     case 'update-anchor-offsets':
       await handleUpdateAnchorOffsets(msg.startOffset, msg.endOffset, msg.betweenOffset);
@@ -456,16 +494,17 @@ async function handleCreateOrUpdate(style: FlowStyle): Promise<void> {
       const meta = readMeta(flow);
       if (!meta || (flow.type !== 'FRAME' && flow.type !== 'VECTOR')) continue;
       const next: FlowMeta = { ...meta, ...style };
-      // Style updates (color, anchor side, preset, etc.) always
-      // re-center the path offsets. The user's stated invariant is
-      // "offset must always be at the center of each frame" — this
-      // enforces it at the meta level so neither stale UI state nor
-      // dropped offset messages can desync the rendered geometry
-      // from the slider. Per-flow drag adjustments still work
-      // (update-anchor-offsets path leaves style untouched).
-      next.startOffset = DEFAULT_ANCHOR_OFFSET;
-      next.endOffset = DEFAULT_ANCHOR_OFFSET;
-      next.betweenOffset = DEFAULT_BETWEEN_OFFSET;
+      // Anchors and offsets are STRUCTURAL — they describe where/how the line
+      // connects, not its visual style. A colour/label/preset update must never
+      // move the connection, so always keep the flow's own anchors AND offsets,
+      // even if the incoming style happens to carry stale ones. Only the anchor
+      // dots (update-anchors) and the offset sliders (update-anchor-offsets)
+      // change them. This stops typing a label from re-routing the line.
+      next.startAnchor = meta.startAnchor;
+      next.endAnchor = meta.endAnchor;
+      next.startOffset = meta.startOffset;
+      next.endOffset = meta.endOffset;
+      next.betweenOffset = meta.betweenOffset;
       writeMeta(flow, next);
       // Coalesce: in-flight render absorbs new style; we don't await so the
       // UI message handler returns immediately and Figma stays responsive.
@@ -512,6 +551,38 @@ async function handleSwap(): Promise<void> {
   await syncUi();
 }
 
+/** Pin/unpin anchor sides on the selected flow(s). Separate from style updates
+ *  so a label/colour change never re-routes a line. Re-centers the offset of
+ *  any side whose anchor actually changed — the offset is measured along the
+ *  edge, so it's meaningless once the side rotates. */
+async function handleUpdateAnchors(startAnchor: Anchor, endAnchor: Anchor): Promise<void> {
+  if (!active) return;
+  lastStyle.startAnchor = startAnchor;
+  lastStyle.endAnchor = endAnchor;
+  const flows = figma.currentPage.selection.filter((n) => readMeta(n) !== null);
+  for (const flow of flows) {
+    const meta = readMeta(flow);
+    if (!meta || (flow.type !== 'FRAME' && flow.type !== 'VECTOR')) continue;
+    const next: FlowMeta = { ...meta };
+    let changed = false;
+    if (meta.startAnchor !== startAnchor) {
+      next.startAnchor = startAnchor;
+      next.startOffset = DEFAULT_ANCHOR_OFFSET;
+      changed = true;
+    }
+    if (meta.endAnchor !== endAnchor) {
+      next.endAnchor = endAnchor;
+      next.endOffset = DEFAULT_ANCHOR_OFFSET;
+      changed = true;
+    }
+    if (!changed) continue;
+    next.betweenOffset = DEFAULT_BETWEEN_OFFSET;
+    writeMeta(flow, next);
+    void enqueueRender(flow, next);
+  }
+  await syncUi();
+}
+
 async function handleUpdateAnchorOffsets(
   startOffset?: number,
   endOffset?: number,
@@ -537,7 +608,8 @@ async function handleUpdateAnchorOffsets(
     if (eClamp !== undefined) next.endOffset = eClamp;
     if (bClamp !== undefined) next.betweenOffset = bClamp;
     writeMeta(flow, next);
-    void enqueueRender(flow, next);
+    // Offsets only move geometry — preserve any visual edits the user made.
+    void enqueueRender(flow, next, true);
   }
   // If start/end moved, the path may have transitioned between
   // straight ↔ bent shapes — push just the Between slider's enabled
@@ -589,7 +661,12 @@ async function postBetweenSupportFromSelection(): Promise<void> {
 // ---------------------------------------------------------------------------
 
 const renderInFlight = new Set<string>();
-const renderPending = new Map<string, FlowMeta>();
+// preserveVisual: true when this render is geometry-only (a frame moved or an
+// anchor offset changed) and must NOT re-impose meta's stroke/colour/dash/caps,
+// so manual edits the user made to the line in Figma survive. False for
+// deliberate style changes from the panel (and at creation), which DO apply
+// meta's visual style.
+const renderPending = new Map<string, { meta: FlowMeta; preserveVisual: boolean }>();
 // (lastRenderHash is declared with the reverse indices near the top — it has
 // to exist before the synchronous bootstrap call, which now reaches it.)
 function renderInputHash(meta: FlowMeta, fromBox: Box, toBox: Box): string {
@@ -605,20 +682,25 @@ function renderInputHash(meta: FlowMeta, fromBox: Box, toBox: Box): string {
   ]);
 }
 
-async function enqueueRender(node: SceneNode, meta: FlowMeta): Promise<void> {
+async function enqueueRender(node: SceneNode, meta: FlowMeta, preserveVisual = false): Promise<void> {
   const id = node.id;
   if (renderInFlight.has(id)) {
-    renderPending.set(id, meta);
+    // Coalesce: a pending render only stays visual-preserving if BOTH the
+    // queued and the incoming render are — a style change in either direction
+    // must still apply meta's visual.
+    const prev = renderPending.get(id);
+    const merged = prev ? prev.preserveVisual && preserveVisual : preserveVisual;
+    renderPending.set(id, { meta, preserveVisual: merged });
     return;
   }
   renderInFlight.add(id);
   try {
-    await renderFlow(node, meta);
+    await renderFlow(node, meta, preserveVisual);
     while (renderPending.has(id)) {
       const next = renderPending.get(id)!;
       renderPending.delete(id);
       if (node.removed) break;
-      await renderFlow(node, next);
+      await renderFlow(node, next.meta, next.preserveVisual);
     }
   } finally {
     renderInFlight.delete(id);
@@ -758,17 +840,19 @@ async function syncFlowLabel(vec: VectorNode, meta: FlowMeta, midAbs: Point): Pr
   return { ...meta, labelNodeId: created.id };
 }
 
-async function renderFlow(node: SceneNode, meta: FlowMeta): Promise<void> {
+async function renderFlow(node: SceneNode, meta: FlowMeta, preserveVisual = false): Promise<void> {
   if (node.type === 'VECTOR') {
-    await renderVectorFlow(node, meta);
+    await renderVectorFlow(node, meta, preserveVisual);
     return;
   }
   if (node.type === 'FRAME' && readMeta(node)) {
+    // Legacy frame flows rebuild their children from scratch on every render,
+    // so there's no in-place visual to preserve — they always re-apply meta.
     await renderLegacyFrameFlow(node as FrameNode, meta);
   }
 }
 
-async function renderVectorFlow(vec: VectorNode, meta: FlowMeta): Promise<void> {
+async function renderVectorFlow(vec: VectorNode, meta: FlowMeta, preserveVisual = false): Promise<void> {
   let fromNode = await figma.getNodeByIdAsync(meta.fromNodeId) as SceneNode | null;
   let toNode = await figma.getNodeByIdAsync(meta.toNodeId) as SceneNode | null;
   if (!fromNode || !toNode || fromNode.removed || toNode.removed) {
@@ -823,8 +907,18 @@ async function renderVectorFlow(vec: VectorNode, meta: FlowMeta): Promise<void> 
   const startPoint = pointOnSide(fromBox, startSide, meta.startOffset ?? DEFAULT_ANCHOR_OFFSET);
   const endPoint = pointOnSide(toBox, endSide, meta.endOffset ?? DEFAULT_ANCHOR_OFFSET);
 
-  const capS = arrowTypeToStrokeCap(meta.startArrow);
-  const capE = arrowTypeToStrokeCap(meta.endArrow);
+  let capS: StrokeCap;
+  let capE: StrokeCap;
+  if (preserveVisual) {
+    // Geometry-only re-render: keep the end caps the line currently has (the
+    // user may have changed them in Figma) rather than forcing meta's arrows.
+    const verts = vec.vectorNetwork?.vertices;
+    capS = verts && verts.length > 0 ? (verts[0].strokeCap ?? 'NONE') : arrowTypeToStrokeCap(meta.startArrow);
+    capE = verts && verts.length > 0 ? (verts[verts.length - 1].strokeCap ?? 'NONE') : arrowTypeToStrokeCap(meta.endArrow);
+  } else {
+    capS = arrowTypeToStrokeCap(meta.startArrow);
+    capE = arrowTypeToStrokeCap(meta.endArrow);
+  }
 
   let vertices: VectorVertex[] = [];
   let segments: VectorSegment[] = [];
@@ -875,18 +969,22 @@ async function renderVectorFlow(vec: VectorNode, meta: FlowMeta): Promise<void> 
   vec.y = minY;
   vec.name = flowName(meta.label.text);
 
-  const strokePaint: Paint = {
-    type: 'SOLID',
-    color: hexToRgb(meta.strokeColor),
-    opacity: meta.opacity / 100,
-  };
-  vec.strokes = [strokePaint];
-  vec.strokeWeight = meta.strokeWidth;
-  vec.strokeAlign = 'CENTER';
-  vec.strokeJoin = 'ROUND';
-  vec.dashPattern =
-    meta.strokeStyle === 'dashed' ? [meta.strokeWidth * 2, meta.strokeWidth * 2] : [];
-  vec.fills = [];
+  if (!preserveVisual) {
+    // Apply meta's visual style. Skipped on geometry-only re-renders so a
+    // frame move never overwrites stroke/colour/dash the user set in Figma.
+    const strokePaint: Paint = {
+      type: 'SOLID',
+      color: hexToRgb(meta.strokeColor),
+      opacity: meta.opacity / 100,
+    };
+    vec.strokes = [strokePaint];
+    vec.strokeWeight = meta.strokeWidth;
+    vec.strokeAlign = 'CENTER';
+    vec.strokeJoin = 'ROUND';
+    vec.dashPattern =
+      meta.strokeStyle === 'dashed' ? [meta.strokeWidth * 2, meta.strokeWidth * 2] : [];
+    vec.fills = [];
+  }
 
   // setVectorNetworkAsync replaces the underlying network; the previous
   // `vec.vectorPaths = []` write was redundant and forced an extra commit.
@@ -1018,6 +1116,10 @@ function queueFlowRerenderEndpointsFromChanges(event: DocumentChangeEvent): void
       // flowToEndpoints reverse map.
       if (flowToEndpoints.has(change.id)) {
         unindexFlow(change.id);
+        // The label is a separate sibling node, and selection-promotion
+        // collapses a marquee over [flow, label] down to just the flow — so a
+        // delete removes the line but strands the label. Remove it too.
+        void removeLabelsOwnedBy(change.id);
       }
       // Was this a label node?
       const ownerFlowId = labelToFlow.get(change.id);
@@ -1226,7 +1328,8 @@ async function rerenderFlowsForEndpointIds(endpointIds: Set<string>): Promise<vo
     if (node.type !== 'VECTOR' && node.type !== 'FRAME') continue;
     const meta = readMeta(node);
     if (!meta) continue;
-    void enqueueRender(node, meta);
+    // A frame moved → reposition only; never re-impose meta's visual style.
+    void enqueueRender(node, meta, true);
   }
 }
 
@@ -1366,20 +1469,53 @@ function isConnectableNode(node: SceneNode): boolean {
   }
 }
 
-async function findFlowBetween(idA: string, idB: string): Promise<SceneNode | null> {
-  // Use the reverse index — intersect flow sets for both endpoints, then
-  // confirm direction-agnostic match via meta. O(min(|A|,|B|)) instead of
-  // a full-page findAll.
+/** How many flows already connect this pair of frames, in either direction.
+ *  Synchronous: reads true endpoints from flowToEndpoints (not ancestor keys),
+ *  so it never has to fetch nodes. Used to pick a non-overlapping track for a
+ *  newly created flow. */
+function countFlowsBetween(idA: string, idB: string): number {
   const setA = endpointToFlows.get(idA);
-  if (!setA || setA.size === 0) return null;
   const setB = endpointToFlows.get(idB);
+  if (!setA || !setB) return 0;
+  const [small, large] = setA.size <= setB.size ? [setA, setB] : [setB, setA];
+  let count = 0;
+  for (const fid of small) {
+    if (!large.has(fid)) continue;
+    const eps = flowToEndpoints.get(fid);
+    if (!eps) continue;
+    const [f, t] = eps;
+    if ((f === idA && t === idB) || (f === idB && t === idA)) count++;
+  }
+  return count;
+}
+
+/** Anchor-offset track for the n-th flow between a pair of frames. The first
+ *  (index 0) stays centred; later ones fan out to alternating sides of centre
+ *  so reverse/parallel connectors don't overlap. Clamped to stay on the edge. */
+function offsetTrackForIndex(index: number): number {
+  if (index <= 0) return DEFAULT_ANCHOR_OFFSET;
+  const step = Math.ceil(index / 2);           // 1,1,2,2,3,3,…
+  const dir = index % 2 === 1 ? 1 : -1;        // +,−,+,−,…
+  return Math.max(0.1, Math.min(0.9, DEFAULT_ANCHOR_OFFSET + dir * 0.2 * step));
+}
+
+async function findFlowInDirection(fromId: string, toId: string): Promise<SceneNode | null> {
+  // Use the reverse index — intersect flow sets for both endpoints, then
+  // confirm the match runs from→to via meta. The meta check also discards
+  // candidates where fromId/toId is merely an ANCESTOR of the real endpoint
+  // (the index keys ancestors too). Direction-specific, so A→B and B→A coexist.
+  // O(min(|A|,|B|)) instead of a full-page findAll.
+  const setA = endpointToFlows.get(fromId);
+  if (!setA || setA.size === 0) return null;
+  const setB = endpointToFlows.get(toId);
   if (!setB || setB.size === 0) return null;
   const [small, large] = setA.size <= setB.size ? [setA, setB] : [setB, setA];
   for (const fid of small) {
     if (!large.has(fid)) continue;
     const node = await figma.getNodeByIdAsync(fid) as SceneNode | null;
     if (!node || node.removed) { unindexFlow(fid); continue; }
-    return node;
+    const meta = readMeta(node);
+    if (meta && meta.fromNodeId === fromId && meta.toNodeId === toId) return node;
   }
   return null;
 }
