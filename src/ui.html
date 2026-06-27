@@ -1410,6 +1410,18 @@
         next.label = Object.assign({}, DEFAULTS.label, base.label || {}, patch.label || {});
         if (patch.labelFontSize !== undefined) next.label.fontSize = patch.labelFontSize;
         delete next.labelFontSize;
+        // Strip non-style fields that older builds may have baked into a saved
+        // preset. Offsets/anchors-as-position belong to the FLOW, not the
+        // style/brush — leaving them here leaks them into update-style and
+        // re-routes the line on the next edit.
+        delete next.startOffset;
+        delete next.endOffset;
+        delete next.betweenOffset;
+        delete next.fromNodeId;
+        delete next.toNodeId;
+        delete next.labelNodeId;
+        delete next.fromFrameUuid;
+        delete next.toFrameUuid;
         return next;
       }
 
@@ -1557,6 +1569,7 @@
         state.endAnchor = prevEndAnchor;
         applyStateToUi();
         updatePresetUi();
+        applyRememberLabel(true); // toggle + sandbox follow the new preset
         emit();
       }
 
@@ -1567,6 +1580,7 @@
           activePreset = 'default';
           state = cloneStyle(savedPresetStyles['default'] || DEFAULTS);
           applyStateToUi();
+          applyRememberLabel(true); // fell back to Default → sync the toggle
         }
         renderPresets();
         post({ type: 'save-preset-styles', styles: savedPresetStyles });
@@ -1611,6 +1625,7 @@
         state.startAnchor = prevStartAnchor;
         state.endAnchor = prevEndAnchor;
         applyStateToUi();
+        applyRememberLabel(true); // new preset → remember defaults off
         hideAddPresetInput();
         renderPresets();
         post({ type: 'save-preset-styles', styles: savedPresetStyles });
@@ -1626,11 +1641,11 @@
       function saveActivePresetStyle() {
         const name = activePreset || 'default';
         // Label text is per-line content. Bake it into the saved preset only
-        // when "remember" is on; otherwise keep the preset's designed label
-        // (blank for Default/user presets, the built-in text for Success/Error)
-        // so a one-off label never sticks to the style or survives a reopen.
+        // when THIS preset remembers; otherwise keep its designed label (blank
+        // for Default/user presets, the built-in text for Success/Error) so a
+        // one-off label never sticks to the style or survives a reopen.
         let style = state;
-        if (!rememberLabel) {
+        if (!getRemember(name)) {
           style = cloneStyle(state);
           const dp = DEFAULT_PRESETS[name];
           style.label.text = dp && dp.label ? (dp.label.text || '') : '';
@@ -1966,18 +1981,30 @@
         scheduleResize();
       };
 
-      // Remember-label preference (default off). Persisted in localStorage and
-      // pushed to the sandbox, which clears a new flow's label unless it's on.
-      const REMEMBER_LABEL_KEY = 'easyflow.rememberLabel';
-      let rememberLabel = false;
-      try { rememberLabel = localStorage.getItem(REMEMBER_LABEL_KEY) === '1'; } catch (_) {}
+      // Remember-label is a PER-PRESET setting (which presets keep their label
+      // text). Stored as a name→bool map in localStorage; built-in Success/Error
+      // default on, everything else off. `rememberLabel` mirrors the ACTIVE
+      // preset and is the value pushed to the sandbox.
+      const REMEMBER_LABEL_KEY = 'easyflow.presetRemember';
+      const DEFAULT_REMEMBER = { success: true, error: true };
+      let presetRemember = {};
+      try { presetRemember = JSON.parse(localStorage.getItem(REMEMBER_LABEL_KEY) || '{}') || {}; } catch (_) { presetRemember = {}; }
+      function getRemember(name) {
+        const n = name || 'default';
+        return n in presetRemember ? !!presetRemember[n] : !!DEFAULT_REMEMBER[n];
+      }
+      let rememberLabel = getRemember(activePreset);
+      // Reflect the active preset's flag in the toggle and push it to the
+      // sandbox. Call whenever the active preset changes.
       function applyRememberLabel(push) {
+        rememberLabel = getRemember(activePreset);
         $('remember-label-toggle').classList.toggle('on', rememberLabel);
-        try { localStorage.setItem(REMEMBER_LABEL_KEY, rememberLabel ? '1' : '0'); } catch (_) {}
         if (push) post({ type: 'set-remember-label', on: rememberLabel });
       }
       $('remember-label-toggle').onclick = () => {
-        rememberLabel = !rememberLabel;
+        const n = activePreset || 'default';
+        presetRemember[n] = !getRemember(n);
+        try { localStorage.setItem(REMEMBER_LABEL_KEY, JSON.stringify(presetRemember)); } catch (_) {}
         applyRememberLabel(true);
       };
 
@@ -2071,18 +2098,15 @@
           showDraftAnchors = true;
           renderAnchorDots();
           if (resetSide && (mode === 'one-flow' || mode === 'multi-flow')) {
-            applyPathOffsetUi();
-            const reset = {};
-            reset.type = 'update-anchor-offsets';
-            if (resetSide === 'start') reset.startOffset = 0.5;
-            if (resetSide === 'end') reset.endOffset = 0.5;
-            post(reset);
+            applyPathOffsetUi(); // reflect the re-centered slider right away
           }
-          // Send the anchor side change immediately (not via rAF). The
-          // anchor side is a deliberate user gesture, not a continuous
-          // value, so coalescing it can let it lose to other in-flight
-          // messages and leave the meta out of sync with the panel.
-          emit(true);
+          // Persist the brush anchor with the active preset, then apply the
+          // side change via its OWN message. Anchors are structural, so they
+          // must not ride on update-style — otherwise a later label/colour edit
+          // re-sends the anchor and can re-route the line. The sandbox
+          // re-centers the offset of whichever side actually changed.
+          saveActivePresetStyle();
+          post({ type: 'update-anchors', startAnchor: state.startAnchor, endAnchor: state.endAnchor });
         });
       });
 
@@ -2236,6 +2260,22 @@
           if (msg.style) {
             state.startAnchor = msg.style.startAnchor || 'auto';
             state.endAnchor = msg.style.endAnchor || 'auto';
+            // For a SINGLE selected flow, mirror its full visual style into the
+            // panel so editing one field (e.g. the label) re-sends a style that
+            // already matches the flow on every other field — only the edited
+            // one changes. Otherwise the brush's lineType/radius/colour would
+            // ride along with a label edit and re-route or restyle the line.
+            // (Label is intentionally left to the remember model.)
+            if (mode === 'one-flow') {
+              state.strokeColor = msg.style.strokeColor;
+              state.opacity = msg.style.opacity;
+              state.strokeWidth = msg.style.strokeWidth;
+              state.strokeStyle = msg.style.strokeStyle;
+              state.lineType = msg.style.lineType;
+              state.radius = msg.style.radius;
+              state.startArrow = msg.style.startArrow;
+              state.endArrow = msg.style.endArrow;
+            }
           }
           startOffsetValue =
             typeof msg.startOffset === 'number' ? msg.startOffset : 0.5;
@@ -2273,9 +2313,9 @@
           savedPresetStyles = normalizePresetStyles(msg.styles || {});
           if (mode !== 'one-flow' && mode !== 'multi-flow') {
             state = cloneStyle(savedPresetStyles['default'] || savedPresetStyles.default || DEFAULTS);
-            // With "remember" off the label is transient — drop any text an
-            // older build may have baked into the saved preset.
-            if (!rememberLabel) state.label.text = '';
+            // If the active preset doesn't remember, the label is transient —
+            // drop any text an older build may have baked into the saved preset.
+            if (!getRemember(activePreset)) state.label.text = '';
             applyStateToUi();
           }
           renderPresets();

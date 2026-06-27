@@ -2,7 +2,7 @@
 // Build marker — bump on every behaviour change so the user can verify
 // Figma actually loaded the latest dist (Figma aggressively caches
 // development plugins; older bundles persist across reloads).
-console.log('[EasyFlow] build 2026-06-26-delete-label-with-flow loaded');
+console.log('[EasyFlow] build 2026-06-26-label-midsegment loaded');
 
 // Safety net: any rejection that escapes a handler (e.g. a getPluginData
 // throw on a node Figma silently deleted) shouldn't crash the plugin or
@@ -37,6 +37,7 @@ import {
   DEFAULT_STYLE,
   FLOW_NAME_PREFIX,
   PLUGIN_DATA_KEY,
+  type Anchor,
   type ArrowType,
   type FlowMeta,
   type FlowStyle,
@@ -212,6 +213,17 @@ async function onSelectionChangedAsync(): Promise<void> {
     }
     const existing = await findFlowInDirection(startNode.id, endNode.id);
     if (existing) {
+      // Re-connecting an already-linked pair makes no new line, but if the
+      // active preset remembers a label the user expects it to land here — so
+      // stamp the remembered label (text + style) onto the existing connector.
+      if (rememberLabel && lastStyle.label.text) {
+        const meta = readMeta(existing);
+        if (meta && meta.label.text !== lastStyle.label.text) {
+          const next: FlowMeta = { ...meta, label: { ...lastStyle.label } };
+          writeMeta(existing, next);
+          void enqueueRender(existing, next);
+        }
+      }
       figma.currentPage.selection = [existing];
       return;
     }
@@ -243,9 +255,9 @@ async function createAndSelectFlow(from: SceneNode, to: SceneNode): Promise<void
     endOffset: track,
     betweenOffset: DEFAULT_BETWEEN_OFFSET,
   };
-  // Unless the user opted to remember it, a new flow shouldn't inherit the
-  // brush's label text — start blank so each connector gets its own label.
-  // Also clear it from the brush and the panel input so nothing lingers.
+  // When the active preset remembers, a new flow inherits the brush's label;
+  // otherwise it starts blank and the brush text + panel input are cleared so a
+  // one-off label doesn't linger.
   if (!rememberLabel) {
     meta.label.text = '';
     lastStyle.label.text = '';
@@ -289,6 +301,9 @@ figma.ui.onmessage = async (msg: UiToPlugin) => {
       break;
     case 'swap-direction':
       await handleSwap();
+      break;
+    case 'update-anchors':
+      await handleUpdateAnchors(msg.startAnchor, msg.endAnchor);
       break;
     case 'update-anchor-offsets':
       await handleUpdateAnchorOffsets(msg.startOffset, msg.endOffset, msg.betweenOffset);
@@ -479,16 +494,17 @@ async function handleCreateOrUpdate(style: FlowStyle): Promise<void> {
       const meta = readMeta(flow);
       if (!meta || (flow.type !== 'FRAME' && flow.type !== 'VECTOR')) continue;
       const next: FlowMeta = { ...meta, ...style };
-      // Style updates (color, anchor side, preset, etc.) always
-      // re-center the path offsets. The user's stated invariant is
-      // "offset must always be at the center of each frame" — this
-      // enforces it at the meta level so neither stale UI state nor
-      // dropped offset messages can desync the rendered geometry
-      // from the slider. Per-flow drag adjustments still work
-      // (update-anchor-offsets path leaves style untouched).
-      next.startOffset = DEFAULT_ANCHOR_OFFSET;
-      next.endOffset = DEFAULT_ANCHOR_OFFSET;
-      next.betweenOffset = DEFAULT_BETWEEN_OFFSET;
+      // Anchors and offsets are STRUCTURAL — they describe where/how the line
+      // connects, not its visual style. A colour/label/preset update must never
+      // move the connection, so always keep the flow's own anchors AND offsets,
+      // even if the incoming style happens to carry stale ones. Only the anchor
+      // dots (update-anchors) and the offset sliders (update-anchor-offsets)
+      // change them. This stops typing a label from re-routing the line.
+      next.startAnchor = meta.startAnchor;
+      next.endAnchor = meta.endAnchor;
+      next.startOffset = meta.startOffset;
+      next.endOffset = meta.endOffset;
+      next.betweenOffset = meta.betweenOffset;
       writeMeta(flow, next);
       // Coalesce: in-flight render absorbs new style; we don't await so the
       // UI message handler returns immediately and Figma stays responsive.
@@ -531,6 +547,38 @@ async function handleSwap(): Promise<void> {
     // Endpoints are the same set after swap, so the reverse index doesn't change.
     writeMeta(flow, swapped);
     void enqueueRender(flow, swapped);
+  }
+  await syncUi();
+}
+
+/** Pin/unpin anchor sides on the selected flow(s). Separate from style updates
+ *  so a label/colour change never re-routes a line. Re-centers the offset of
+ *  any side whose anchor actually changed — the offset is measured along the
+ *  edge, so it's meaningless once the side rotates. */
+async function handleUpdateAnchors(startAnchor: Anchor, endAnchor: Anchor): Promise<void> {
+  if (!active) return;
+  lastStyle.startAnchor = startAnchor;
+  lastStyle.endAnchor = endAnchor;
+  const flows = figma.currentPage.selection.filter((n) => readMeta(n) !== null);
+  for (const flow of flows) {
+    const meta = readMeta(flow);
+    if (!meta || (flow.type !== 'FRAME' && flow.type !== 'VECTOR')) continue;
+    const next: FlowMeta = { ...meta };
+    let changed = false;
+    if (meta.startAnchor !== startAnchor) {
+      next.startAnchor = startAnchor;
+      next.startOffset = DEFAULT_ANCHOR_OFFSET;
+      changed = true;
+    }
+    if (meta.endAnchor !== endAnchor) {
+      next.endAnchor = endAnchor;
+      next.endOffset = DEFAULT_ANCHOR_OFFSET;
+      changed = true;
+    }
+    if (!changed) continue;
+    next.betweenOffset = DEFAULT_BETWEEN_OFFSET;
+    writeMeta(flow, next);
+    void enqueueRender(flow, next);
   }
   await syncUi();
 }

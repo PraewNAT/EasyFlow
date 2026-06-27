@@ -95,6 +95,10 @@ export type UiToPlugin =
   | { type: 'create-flow'; style: FlowStyle }
   | { type: 'update-style'; style: FlowStyle }
   | { type: 'swap-direction' }
+  /** Pin/unpin the anchor sides of the selected flow(s). Anchors are
+   *  structural, not visual style, so they travel on their own message rather
+   *  than riding along with every label/colour update-style. */
+  | { type: 'update-anchors'; startAnchor: Anchor; endAnchor: Anchor }
   | { type: 'resize-ui'; height: number; width?: number }
   | { type: 'save-preset-styles'; styles: PresetStyles }
   | {
