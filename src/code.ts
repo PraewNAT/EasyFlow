@@ -2,7 +2,7 @@
 // Build marker — bump on every behaviour change so the user can verify
 // Figma actually loaded the latest dist (Figma aggressively caches
 // development plugins; older bundles persist across reloads).
-console.log('[EasyFlow] build 2026-06-27-ui-tweaks loaded');
+console.log('[EasyFlow] build 2026-06-29-label-delete-fix-2 loaded');
 
 // Safety net: any rejection that escapes a handler (e.g. a getPluginData
 // throw on a node Figma silently deleted) shouldn't crash the plugin or
@@ -790,6 +790,26 @@ async function removeLabelsOwnedBy(flowId: string): Promise<void> {
   if (label && !label.removed) label.remove();
 }
 
+/** The user deleted a flow's label box directly on the canvas. Wipe the label
+ *  text off the flow's META too — otherwise the remembered text revives the
+ *  label on the next render (or the next plugin open), so a manual delete
+ *  "comes back". Safe against EasyFlow's own label refreshes: those call
+ *  removeFlowLabel, which drops the labelToFlow entry before the change event
+ *  is delivered, so this only runs for a genuine user-initiated delete. */
+async function clearFlowLabelMeta(flowId: string): Promise<void> {
+  const node = await figma.getNodeByIdAsync(flowId);
+  if (!node || node.removed) return;
+  const meta = readMeta(node);
+  if (!meta) return;
+  if (meta.label.text === '' && meta.labelNodeId === undefined) return;
+  const next: FlowMeta = { ...meta, label: { ...meta.label, text: '' } };
+  delete next.labelNodeId;
+  writeMeta(node, next);
+  if ((node.type === 'VECTOR' || node.type === 'FRAME')) {
+    node.name = flowName('');
+  }
+}
+
 /** Cheap key over every label-affecting field — if it matches, only the
  *  position has to move (no fonts to load, no node to recreate). */
 function labelSignature(meta: FlowMeta): string {
@@ -802,7 +822,7 @@ function labelSignature(meta: FlowMeta): string {
 }
 const LABEL_SIG_KEY = 'easyflow.labelSig';
 
-async function syncFlowLabel(vec: VectorNode, meta: FlowMeta, midAbs: Point): Promise<FlowMeta> {
+async function syncFlowLabel(vec: VectorNode, meta: FlowMeta, midAbs: Point, wasHealed = false): Promise<FlowMeta> {
   const wantsLabel = meta.label.text.trim().length > 0;
   const sig = wantsLabel ? labelSignature(meta) : '';
 
@@ -819,6 +839,19 @@ async function syncFlowLabel(vec: VectorNode, meta: FlowMeta, midAbs: Point): Pr
         labelToFlow.set(existing.id, vec.id);
         return meta;
       }
+    } else if (!wasHealed) {
+      // The flow once had a label node (labelNodeId is set) but it's gone now,
+      // and this isn't a cross-file paste (endpoints were intact) — so the user
+      // deleted the label box directly on the canvas. Honor that: clear the
+      // text instead of resurrecting it from meta on the next render/open.
+      // (On a paste the node is legitimately missing and SHOULD be rebuilt, so
+      // we skip this and fall through to recreation below.)
+      flowToLabel.delete(vec.id);
+      if (meta.labelNodeId) labelToFlow.delete(meta.labelNodeId);
+      vec.name = flowName(''); // caller already named it from the stale text
+      const { labelNodeId: _l, ...rest } = meta;
+      const cleared = { ...rest, label: { ...meta.label, text: '' } } as FlowMeta;
+      return cleared;
     }
   }
 
@@ -855,6 +888,11 @@ async function renderFlow(node: SceneNode, meta: FlowMeta, preserveVisual = fals
 async function renderVectorFlow(vec: VectorNode, meta: FlowMeta, preserveVisual = false): Promise<void> {
   let fromNode = await figma.getNodeByIdAsync(meta.fromNodeId) as SceneNode | null;
   let toNode = await figma.getNodeByIdAsync(meta.toNodeId) as SceneNode | null;
+  // True only when this render re-bound the flow to new endpoints (cross-file
+  // paste). Used below to decide whether a missing label node means "the user
+  // deleted it" (same file → clear it) or "it was left behind by a paste"
+  // (→ legitimately recreate it from meta).
+  let wasHealed = false;
   if (!fromNode || !toNode || fromNode.removed || toNode.removed) {
     // Orphaned — common after a cross-file copy/paste, where the pasted vec
     // retains the OLD endpoint ids (which don't exist in the new file).
@@ -864,6 +902,7 @@ async function renderVectorFlow(vec: VectorNode, meta: FlowMeta, preserveVisual 
     // source/target frame edges and we can find which frames they belong to.
     const healed = healByUuid(meta) ?? await healOrphanedFlow(vec);
     if (healed) {
+      wasHealed = true;
       unindexFlow(vec.id);
       meta = { ...meta, fromNodeId: healed.fromNodeId, toNodeId: healed.toNodeId };
       writeMeta(vec, meta);
@@ -991,7 +1030,7 @@ async function renderVectorFlow(vec: VectorNode, meta: FlowMeta, preserveVisual 
   await vec.setVectorNetworkAsync({ vertices: relVerts, segments });
 
   const mid = pathMidpoint(meta.lineType, startPoint, startSide, endPoint, endSide, meta.radius, toBox, fromBox, meta.betweenOffset);
-  const nextMeta = await syncFlowLabel(vec, meta, mid);
+  const nextMeta = await syncFlowLabel(vec, meta, mid, wasHealed);
   writeMeta(vec, nextMeta);
 }
 
@@ -1121,11 +1160,16 @@ function queueFlowRerenderEndpointsFromChanges(event: DocumentChangeEvent): void
         // delete removes the line but strands the label. Remove it too.
         void removeLabelsOwnedBy(change.id);
       }
-      // Was this a label node?
+      // Was this a label node the USER deleted directly on the canvas?
+      // (EasyFlow's own label swaps go through removeFlowLabel, which clears
+      // this index entry first, so they don't reach here.) Drop the index AND
+      // wipe the text off the flow's meta so the next render doesn't recreate
+      // the label from the remembered text.
       const ownerFlowId = labelToFlow.get(change.id);
       if (ownerFlowId) {
         labelToFlow.delete(change.id);
         flowToLabel.delete(ownerFlowId);
+        void clearFlowLabelMeta(ownerFlowId);
       }
       continue;
     }

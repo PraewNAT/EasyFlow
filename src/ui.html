@@ -2254,31 +2254,17 @@
           resolvedEndSide = msg.resolvedEndSide || null;
           fromName = msg.fromName || '';
           toName = msg.toName || '';
-          // Brush model: don't sync VISUAL style fields (color, stroke,
-          // arrows, label) from the selected flow — the panel keeps the
-          // user's last-set brush. But DO sync structural fields that
-          // describe where the flow connects (anchor sides). Without this,
-          // clicking the same anchor dot the brush already has pinned
-          // toggles it off when the user expected to pin it.
+          // Brush model: the panel always shows the user's active preset /
+          // last-set brush (its colour, stroke, arrows, label) — NOT the
+          // selected flow's own visual style. Selecting a red "Error" line
+          // must not repaint the panel red when the active preset is the cyan
+          // Default; the panel represents what you'll paint with, independent
+          // of what's selected. We DO sync the structural anchor sides so the
+          // anchor dots reflect where the selected flow actually attaches
+          // (clicking the already-pinned dot shouldn't toggle it off).
           if (msg.style) {
             state.startAnchor = msg.style.startAnchor || 'auto';
             state.endAnchor = msg.style.endAnchor || 'auto';
-            // For a SINGLE selected flow, mirror its full visual style into the
-            // panel so editing one field (e.g. the label) re-sends a style that
-            // already matches the flow on every other field — only the edited
-            // one changes. Otherwise the brush's lineType/radius/colour would
-            // ride along with a label edit and re-route or restyle the line.
-            // (Label is intentionally left to the remember model.)
-            if (mode === 'one-flow') {
-              state.strokeColor = msg.style.strokeColor;
-              state.opacity = msg.style.opacity;
-              state.strokeWidth = msg.style.strokeWidth;
-              state.strokeStyle = msg.style.strokeStyle;
-              state.lineType = msg.style.lineType;
-              state.radius = msg.style.radius;
-              state.startArrow = msg.style.startArrow;
-              state.endArrow = msg.style.endArrow;
-            }
           }
           startOffsetValue =
             typeof msg.startOffset === 'number' ? msg.startOffset : 0.5;
