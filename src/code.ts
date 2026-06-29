@@ -2,7 +2,7 @@
 // Build marker — bump on every behaviour change so the user can verify
 // Figma actually loaded the latest dist (Figma aggressively caches
 // development plugins; older bundles persist across reloads).
-console.log('[EasyFlow] build 2026-06-26-label-midsegment loaded');
+console.log('[EasyFlow] build 2026-06-27-ui-tweaks loaded');
 
 // Safety net: any rejection that escapes a handler (e.g. a getPluginData
 // throw on a node Figma silently deleted) shouldn't crash the plugin or
@@ -67,7 +67,7 @@ const frameUuidOwner = new Map<string, string>();
 // Plugin bootstrap — everything synchronous so it's ready on the first event
 // ---------------------------------------------------------------------------
 
-figma.showUI(__html__, { width: 368, height: 560, themeColors: true });
+figma.showUI(__html__, { width: 320, height: 560, themeColors: true });
 
 let active = true;
 let lastStyle: FlowStyle = clone(DEFAULT_STYLE);
@@ -316,9 +316,9 @@ figma.ui.onmessage = async (msg: UiToPlugin) => {
     }
     case 'resize-ui': {
       const h = Math.round(msg.height);
-      const w = Math.round(msg.width ?? 368);
+      const w = Math.round(msg.width ?? 320);
       const clampedH = Math.min(1200, Math.max(260, Number.isFinite(h) ? h : 560));
-      const clampedW = Math.min(720, Math.max(320, Number.isFinite(w) ? w : 368));
+      const clampedW = Math.min(720, Math.max(320, Number.isFinite(w) ? w : 320));
       figma.ui.resize(clampedW, clampedH);
       break;
     }
