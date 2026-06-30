@@ -641,6 +641,25 @@
         font-size: 11px;
         color: var(--text-muted);
         line-height: 1.5;
+        display: flex;
+        align-items: center;
+        gap: 4px;
+        flex-wrap: wrap;
+        justify-content: center;
+      }
+      .anchor-empty .kbd {
+        display: inline-flex;
+        align-items: center;
+        gap: 2px;
+        background: var(--surface);
+        border: 1px solid var(--border-strong);
+        border-radius: 4px;
+        padding: 1px 5px;
+        font-size: 10px;
+        font-weight: 600;
+        color: var(--text);
+        line-height: 1.4;
+        box-shadow: 0 1px 0 var(--border-strong);
       }
       /* author display:flex beats the UA display:none for [hidden] — make it explicit */
       .anchor-frame[hidden] { display: none; }
@@ -1287,7 +1306,14 @@
     <div class="anchor-area" id="anchor-area">
       <div class="anchor-empty" id="anchor-empty" hidden>
         <div class="anchor-empty-title">How to connect objects</div>
-        <div class="anchor-empty-desc">Select an object → hold Shift<br>→ select another</div>
+        <div class="anchor-empty-desc">
+          Select object →
+          <span class="kbd">
+            <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7h2l3-4 3 4h2M3 7v10h18V7"/></svg>
+            Shift
+          </span>
+          → select another
+        </div>
       </div>
       <div class="anchor-frame" id="from-frame">
         Start
