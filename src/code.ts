@@ -760,7 +760,7 @@ async function createFlow(meta: FlowMeta): Promise<VectorNode> {
 function arrowTypeToStrokeCap(t: ArrowType): StrokeCap {
   switch (t) {
     case 'none':         return 'NONE';
-    case 'open':         return 'LINE_ARROW';
+    case 'open':         return 'ARROW_LINES';
     case 'arrow':        return 'ARROW_EQUILATERAL';
     case 'triangle-rev': return 'TRIANGLE_FILLED';
     case 'circle':       return 'CIRCLE_FILLED';

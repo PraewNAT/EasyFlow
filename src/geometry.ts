@@ -406,6 +406,15 @@ function labelAnchorPoint(pts: Point[]): Point {
   if (n <= 2) return midpoint(pts[0], pts[n - 1]);
   const segCount = n - 1;
   if (segCount === 2) {
+    // H→H or V→V on the same axis produces [p1, step-midpoint, p2] where all
+    // three points are collinear. The "longer segment" heuristic below would
+    // return the quarter-point (midpoint of the first half) in that case.
+    // Detect collinearity and return the true geometric centre instead.
+    const collinearH =
+      Math.abs(pts[0].y - pts[1].y) < 0.01 && Math.abs(pts[1].y - pts[2].y) < 0.01;
+    const collinearV =
+      Math.abs(pts[0].x - pts[1].x) < 0.01 && Math.abs(pts[1].x - pts[2].x) < 0.01;
+    if (collinearH || collinearV) return midpoint(pts[0], pts[2]);
     const dx0 = Math.abs(pts[1].x - pts[0].x);
     const dx1 = Math.abs(pts[2].x - pts[1].x);
     return dx0 >= dx1 ? midpoint(pts[0], pts[1]) : midpoint(pts[1], pts[2]);
