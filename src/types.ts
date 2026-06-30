@@ -1,7 +1,7 @@
 // Shared types between the Figma sandbox (code.ts) and UI (ui.html).
 
 export type Anchor = 'top' | 'right' | 'bottom' | 'left' | 'auto';
-export type ArrowType = 'none' | 'arrow' | 'circle' | 'diamond';
+export type ArrowType = 'none' | 'open' | 'arrow' | 'triangle-rev' | 'circle' | 'diamond';
 export type StrokeStyle = 'solid' | 'dashed';
 export type LineType = 'step' | 'curved';
 

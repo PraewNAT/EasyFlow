@@ -2166,7 +2166,9 @@
           return `<svg width="48" height="14" viewBox="0 0 48 14" xmlns="http://www.w3.org/2000/svg"><line x1="10" y1="7" x2="38" y2="7" stroke="currentColor" stroke-width="1.6"/></svg>`;
         }
         let head = '';
+        if (t === 'open') head = `<path d="M28 3 L34 7 L28 11" stroke="currentColor" stroke-width="1.6" fill="none" stroke-linecap="round" stroke-linejoin="round"/>`;
         if (t === 'arrow') head = `<path d="M34 7 L28 3 L28 11 Z" fill="currentColor"/>`;
+        if (t === 'triangle-rev') head = `<path d="M28 7 L34 3 L34 11 Z" fill="currentColor"/>`;
         if (t === 'circle') head = `<circle cx="32" cy="7" r="4" fill="currentColor"/>`;
         if (t === 'diamond') head = `<path d="M32 3 L36 7 L32 11 L28 7 Z" fill="currentColor"/>`;
         return `<svg width="48" height="14" viewBox="0 0 48 14" xmlns="http://www.w3.org/2000/svg"><g ${flip}><line x1="10" y1="7" x2="28" y2="7" stroke="currentColor" stroke-width="1.6"/>${head}</g></svg>`;
@@ -2177,7 +2179,7 @@
         $('end-preview').innerHTML = arrowSvg(state.endArrow, false);
       }
 
-      const ARROW_CAP_VALUES = ['none', 'arrow', 'circle', 'diamond'];
+      const ARROW_CAP_VALUES = ['none', 'open', 'arrow', 'triangle-rev', 'circle', 'diamond'];
 
       function closeArrowPickers() {
         document.querySelectorAll('.arrow-picker-panel').forEach((panel) => {

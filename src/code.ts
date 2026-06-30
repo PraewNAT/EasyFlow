@@ -759,16 +759,13 @@ async function createFlow(meta: FlowMeta): Promise<VectorNode> {
 
 function arrowTypeToStrokeCap(t: ArrowType): StrokeCap {
   switch (t) {
-    case 'none':
-      return 'NONE';
-    case 'arrow':
-      return 'ARROW_EQUILATERAL';
-    case 'circle':
-      return 'CIRCLE_FILLED';
-    case 'diamond':
-      return 'DIAMOND_FILLED';
-    default:
-      return 'NONE';
+    case 'none':         return 'NONE';
+    case 'open':         return 'ARROW_LINES';
+    case 'arrow':        return 'ARROW_EQUILATERAL';
+    case 'triangle-rev': return 'NONE';
+    case 'circle':       return 'CIRCLE_FILLED';
+    case 'diamond':      return 'DIAMOND_FILLED';
+    default:             return 'NONE';
   }
 }
 
@@ -1422,9 +1419,11 @@ function buildArrowHead(
   const size = Math.max(8, strokeWidth * 3);
   const dir = sideDirection(side);
   switch (type) {
-    case 'arrow':   return triangleArrow(point, dir, size, paint);
-    case 'circle':  return shapeAt('ELLIPSE', point, size, paint);
-    case 'diamond': return diamondAt(point, size, paint);
+    case 'open':         return openArrow(point, dir, size, strokeWidth, paint);
+    case 'arrow':        return triangleArrow(point, dir, size, paint);
+    case 'triangle-rev': return triangleArrowRev(point, dir, size, paint);
+    case 'circle':       return shapeAt('ELLIPSE', point, size, paint);
+    case 'diamond':      return diamondAt(point, size, paint);
   }
 }
 
@@ -1447,6 +1446,35 @@ function diamondAt(center: Point, size: number, paint: Paint): SceneNode {
     data: `M ${center.x} ${center.y - r} L ${center.x + r} ${center.y} L ${center.x} ${center.y + r} L ${center.x - r} ${center.y} Z`,
   }];
   v.fills = [paint]; v.strokes = []; v.name = 'cap-diamond';
+  return v;
+}
+
+function openArrow(tip: Point, outwardDir: Point, size: number, sw: number, paint: Paint): SceneNode {
+  const base = { x: tip.x + outwardDir.x * size, y: tip.y + outwardDir.y * size };
+  const perp = { x: -outwardDir.y, y: outwardDir.x };
+  const h = size * 0.6;
+  const p2 = { x: base.x + perp.x * h, y: base.y + perp.y * h };
+  const p3 = { x: base.x - perp.x * h, y: base.y - perp.y * h };
+  const v = figma.createVector();
+  v.vectorPaths = [{ windingRule: 'NONE', data: `M ${p2.x} ${p2.y} L ${tip.x} ${tip.y} L ${p3.x} ${p3.y}` }];
+  v.fills = [];
+  v.strokes = [paint];
+  v.strokeWeight = Math.max(1, sw);
+  v.strokeJoin = 'MITER';
+  v.strokeCap = 'NONE';
+  v.name = 'cap-open';
+  return v;
+}
+
+function triangleArrowRev(tip: Point, outwardDir: Point, size: number, paint: Paint): SceneNode {
+  const inwardTip = { x: tip.x - outwardDir.x * size, y: tip.y - outwardDir.y * size };
+  const perp = { x: -outwardDir.y, y: outwardDir.x };
+  const h = size * 0.6;
+  const p2 = { x: tip.x + perp.x * h, y: tip.y + perp.y * h };
+  const p3 = { x: tip.x - perp.x * h, y: tip.y - perp.y * h };
+  const v = figma.createVector();
+  v.vectorPaths = [{ windingRule: 'NONZERO', data: `M ${inwardTip.x} ${inwardTip.y} L ${p2.x} ${p2.y} L ${p3.x} ${p3.y} Z` }];
+  v.fills = [paint]; v.strokes = []; v.name = 'cap-arrow-rev';
   return v;
 }
 
