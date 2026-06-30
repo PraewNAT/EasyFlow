@@ -1567,6 +1567,11 @@
         state = cloneStyle(p);
         state.startAnchor = prevStartAnchor;
         state.endAnchor = prevEndAnchor;
+        // "Remember label" off means this preset doesn't auto-fill a label —
+        // start empty rather than loading the preset's stored text. (The
+        // stored text is kept on the preset, so toggling remember back on
+        // restores it.)
+        if (!getRemember(name)) state.label.text = '';
         applyStateToUi();
         updatePresetUi();
         applyRememberLabel(true); // toggle + sandbox follow the new preset
@@ -1641,17 +1646,16 @@
       function saveActivePresetStyle() {
         const name = activePreset || 'default';
         // Label text is per-line content. When THIS preset remembers, bake
-        // whatever's on screen into the saved preset. When it doesn't, a
-        // one-off *typed* label shouldn't stick — revert to the preset's
-        // designed label (blank for Default/user presets, the built-in text
-        // for Success/Error). BUT an explicit *clear* (empty) is the user
-        // deliberately removing the label: persist that empty so it stays
-        // gone across reopens instead of the built-in text reviving.
+        // whatever's on screen into the saved preset. When it doesn't, the
+        // on-screen label is transient (empty by default, or a one-off the
+        // user typed) — keep the preset's stored label intact rather than
+        // letting that transient value overwrite it, so toggling remember
+        // back on restores the label the preset had.
         let style = state;
-        if (!getRemember(name) && state.label.text.trim().length > 0) {
+        if (!getRemember(name)) {
           style = cloneStyle(state);
-          const dp = DEFAULT_PRESETS[name];
-          style.label.text = dp && dp.label ? (dp.label.text || '') : '';
+          const existing = savedPresetStyles[name];
+          style.label.text = existing && existing.label ? (existing.label.text || '') : '';
         }
         savePresetStyle(name, style);
       }
@@ -1985,13 +1989,15 @@
       };
 
       // Remember-label is a PER-PRESET setting (which presets keep their label
-      // text). Stored as a name→bool map in localStorage; built-in Success/Error
-      // default on, everything else off. `rememberLabel` mirrors the ACTIVE
-      // preset and is the value pushed to the sandbox.
-      const REMEMBER_LABEL_KEY = 'easyflow.presetRemember';
+      // text). Persisted via clientStorage on the sandbox side (see
+      // 'save-preset-remember' / 'preset-remember') rather than the UI
+      // iframe's own localStorage — Figma doesn't reliably keep the iframe's
+      // localStorage across a plugin close/reopen, so a toggle saved there
+      // could silently revert to its default on the next open. Built-in
+      // Success/Error default on, everything else off. `rememberLabel`
+      // mirrors the ACTIVE preset and is the value pushed to the sandbox.
       const DEFAULT_REMEMBER = { success: true, error: true };
       let presetRemember = {};
-      try { presetRemember = JSON.parse(localStorage.getItem(REMEMBER_LABEL_KEY) || '{}') || {}; } catch (_) { presetRemember = {}; }
       function getRemember(name) {
         const n = name || 'default';
         return n in presetRemember ? !!presetRemember[n] : !!DEFAULT_REMEMBER[n];
@@ -2007,8 +2013,20 @@
       $('remember-label-toggle').onclick = () => {
         const n = activePreset || 'default';
         presetRemember[n] = !getRemember(n);
-        try { localStorage.setItem(REMEMBER_LABEL_KEY, JSON.stringify(presetRemember)); } catch (_) {}
+        post({ type: 'save-preset-remember', remember: presetRemember });
+        // Reflect the change in the label field immediately: turning OFF clears
+        // it (this preset no longer auto-fills a label); turning ON restores
+        // the preset's stored label.
+        if (getRemember(n)) {
+          const p = savedPresetStyles[n];
+          state.label.text = p && p.label ? (p.label.text || '') : '';
+        } else {
+          state.label.text = '';
+        }
+        const li = $('label-text');
+        if (li) li.value = state.label.text;
         applyRememberLabel(true);
+        emit();
       };
 
       function bindNumber(id, key) {
@@ -2314,6 +2332,9 @@
           state.label.text = '';
           const li = $('label-text');
           if (li) li.value = '';
+        } else if (msg.type === 'preset-remember') {
+          presetRemember = msg.remember || {};
+          applyRememberLabel(false); // reflect the loaded flag, don't re-save it
         }
       });
 

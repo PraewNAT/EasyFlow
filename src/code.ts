@@ -2,7 +2,7 @@
 // Build marker — bump on every behaviour change so the user can verify
 // Figma actually loaded the latest dist (Figma aggressively caches
 // development plugins; older bundles persist across reloads).
-console.log('[EasyFlow] build 2026-06-29-label-delete-fix-2 loaded');
+console.log('[EasyFlow] build 2026-06-29-remember-empty-label loaded');
 
 // Safety net: any rejection that escapes a handler (e.g. a getPluginData
 // throw on a node Figma silently deleted) shouldn't crash the plugin or
@@ -142,6 +142,16 @@ void figma.clientStorage.getAsync(SAVED_PRESET_STYLES_KEY).then((styles) => {
     const presetStyles = normalizePresetStyles(raw as PresetStyles);
     if (presetStyles['default']) lastStyle = presetStyles['default'];
     figma.ui.postMessage({ type: 'preset-styles', styles: presetStyles } as PluginToUi);
+  }
+});
+
+// Load the per-preset "remember label" flags. Stored via clientStorage (not
+// the UI iframe's localStorage) so the toggle's state reliably survives a
+// plugin close/reopen.
+const SAVED_PRESET_REMEMBER_KEY = 'easyflow.presetRemember';
+void figma.clientStorage.getAsync(SAVED_PRESET_REMEMBER_KEY).then((remember) => {
+  if (remember && typeof remember === 'object') {
+    figma.ui.postMessage({ type: 'preset-remember', remember: remember as Record<string, boolean> } as PluginToUi);
   }
 });
 
@@ -314,6 +324,9 @@ figma.ui.onmessage = async (msg: UiToPlugin) => {
       void figma.clientStorage.setAsync(SAVED_PRESET_STYLES_KEY, presetStyles);
       break;
     }
+    case 'save-preset-remember':
+      void figma.clientStorage.setAsync(SAVED_PRESET_REMEMBER_KEY, msg.remember);
+      break;
     case 'resize-ui': {
       const h = Math.round(msg.height);
       const w = Math.round(msg.width ?? 320);

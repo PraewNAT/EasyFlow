@@ -101,6 +101,11 @@ export type UiToPlugin =
   | { type: 'update-anchors'; startAnchor: Anchor; endAnchor: Anchor }
   | { type: 'resize-ui'; height: number; width?: number }
   | { type: 'save-preset-styles'; styles: PresetStyles }
+  /** Per-preset "remember label" flags (which presets keep their typed label
+   *  text across new flows / reopens). Persisted via clientStorage, same as
+   *  preset styles, so it survives a plugin close/reopen — unlike the UI
+   *  iframe's own localStorage, which Figma doesn't guarantee to persist. */
+  | { type: 'save-preset-remember'; remember: Record<string, boolean> }
   | {
       type: 'update-anchor-offsets';
       startOffset?: number;
@@ -136,6 +141,8 @@ export type PluginToUi =
     }
   | { type: 'notify'; message: string }
   | { type: 'preset-styles'; styles: PresetStyles }
+  /** Per-preset "remember label" flags, loaded from clientStorage on boot. */
+  | { type: 'preset-remember'; remember: Record<string, boolean> }
   /** Tell the panel to clear its label input — sent after a flow is created
    *  while "remember label" is off, so the text doesn't linger for the next one. */
   | { type: 'reset-label' }
