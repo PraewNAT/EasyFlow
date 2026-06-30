@@ -67,7 +67,7 @@ const frameUuidOwner = new Map<string, string>();
 // Plugin bootstrap — everything synchronous so it's ready on the first event
 // ---------------------------------------------------------------------------
 
-figma.showUI(__html__, { width: 320, height: 560, themeColors: true });
+figma.showUI(__html__, { width: 300, height: 560, themeColors: true });
 
 let active = true;
 let lastStyle: FlowStyle = clone(DEFAULT_STYLE);
@@ -329,9 +329,9 @@ figma.ui.onmessage = async (msg: UiToPlugin) => {
       break;
     case 'resize-ui': {
       const h = Math.round(msg.height);
-      const w = Math.round(msg.width ?? 320);
+      const w = Math.round(msg.width ?? 300);
       const clampedH = Math.min(1200, Math.max(260, Number.isFinite(h) ? h : 560));
-      const clampedW = Math.min(720, Math.max(320, Number.isFinite(w) ? w : 320));
+      const clampedW = Math.min(720, Math.max(300, Number.isFinite(w) ? w : 300));
       figma.ui.resize(clampedW, clampedH);
       break;
     }
