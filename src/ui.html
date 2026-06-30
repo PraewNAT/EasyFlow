@@ -944,6 +944,63 @@
         font-weight: 600;
         margin-bottom: 4px;
       }
+
+      /* Style settings popover */
+      .style-settings-wrap {
+        position: relative;
+        flex-shrink: 0;
+      }
+      .style-settings-btn {
+        width: 32px;
+        height: 32px;
+        background: var(--surface);
+        border: 1px solid var(--border);
+        border-radius: var(--radius-sm);
+        cursor: pointer;
+        color: var(--text-muted);
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        padding: 0;
+        transition: background 120ms ease, border-color 120ms ease, color 120ms ease;
+      }
+      .style-settings-btn:hover {
+        background: var(--surface-2);
+        border-color: var(--border-strong);
+        color: var(--text);
+      }
+      .style-settings-btn.open {
+        background: rgba(37, 99, 235, 0.08);
+        border-color: var(--accent);
+        color: var(--accent);
+      }
+      .style-settings-panel {
+        position: absolute;
+        right: 0;
+        top: calc(100% + 6px);
+        z-index: 200;
+        background: var(--surface);
+        border: 1px solid var(--border-strong);
+        border-radius: var(--radius);
+        box-shadow:
+          0 4px 6px rgba(0, 0, 0, 0.06),
+          0 12px 24px rgba(0, 0, 0, 0.12);
+        padding: 10px 12px;
+        min-width: 210px;
+        flex-direction: column;
+        gap: 10px;
+      }
+      .style-settings-panel:not([hidden]) {
+        display: flex;
+      }
+      .style-settings-label {
+        font-size: 10px;
+        font-weight: 500;
+        color: var(--text-muted);
+        text-transform: uppercase;
+        letter-spacing: 0.04em;
+        margin-bottom: 4px;
+      }
     </style>
   </head>
 
@@ -976,7 +1033,7 @@
       </button>
       <div class="accordion-body">
       <div class="row">
-        <div class="field field-stroke-row" style="flex: 2;">
+        <div class="field field-stroke-row" style="flex: 1;">
           <span class="swatch" style="background: #00eeff;">
             <input type="color" id="stroke-color-picker" value="#00eeff" />
           </span>
@@ -985,46 +1042,64 @@
           <input type="number" id="opacity" value="100" min="0" max="100" />
           <span class="pct-suffix">%</span>
         </div>
-        <div class="segmented" id="line-type">
-          <button data-value="step" class="active" title="Step (orthogonal)">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2">
-              <path d="M4 18 H10 V6 H20" stroke-linecap="round" stroke-linejoin="round" />
+        <div class="style-settings-wrap">
+          <button
+            type="button"
+            class="style-settings-btn"
+            id="style-settings-trigger"
+            aria-expanded="false"
+            aria-haspopup="true"
+            title="Stroke &amp; line settings"
+          >
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round">
+              <line x1="4" y1="6" x2="20" y2="6"/>
+              <circle cx="8" cy="6" r="2" fill="currentColor" stroke="none"/>
+              <line x1="4" y1="12" x2="20" y2="12"/>
+              <circle cx="16" cy="12" r="2" fill="currentColor" stroke="none"/>
+              <line x1="4" y1="18" x2="20" y2="18"/>
+              <circle cx="10" cy="18" r="2" fill="currentColor" stroke="none"/>
             </svg>
           </button>
-          <button data-value="curved" title="Curved">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2">
-              <path d="M4 18 C 10 18, 14 6, 20 6" stroke-linecap="round" />
-            </svg>
-          </button>
-        </div>
-      </div>
-
-      <!-- Stroke + radius + dash -->
-      <div class="row tight">
-        <div class="field">
-          <svg class="icon" viewBox="0 0 24 24" fill="currentColor">
-            <rect x="3" y="6" width="18" height="2" /><rect x="3" y="11" width="18" height="3" /><rect x="3" y="17" width="18" height="4" />
-          </svg>
-          <input
-            type="number"
-            id="stroke-width"
-            value="4"
-            min="0"
-            max="40"
-            step="1"
-          />
-        </div>
-        <div class="field">
-          <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4">
-            <path d="M4 20 V12 A8 8 0 0 1 12 4 H20" stroke-linecap="round" />
-          </svg>
-          <input type="number" id="radius" value="20" min="0" max="200" step="1" />
-        </div>
-        <div class="field">
-          <svg class="icon" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.4">
-            <path d="M3 12 H7 M11 12 H15 M19 12 H21" stroke-linecap="round" />
-          </svg>
-          <input type="number" id="dash" value="0" min="0" max="40" step="1" title="Dash gap (0 = solid)" />
+          <div class="style-settings-panel" id="style-settings-panel" hidden>
+            <div>
+              <div class="style-settings-label">Line type</div>
+              <div class="segmented" id="line-type">
+                <button data-value="step" class="active" title="Step (orthogonal)">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2">
+                    <path d="M4 18 H10 V6 H20" stroke-linecap="round" stroke-linejoin="round" />
+                  </svg>
+                </button>
+                <button data-value="curved" title="Curved">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2">
+                    <path d="M4 18 C 10 18, 14 6, 20 6" stroke-linecap="round" />
+                  </svg>
+                </button>
+              </div>
+            </div>
+            <div>
+              <div class="style-settings-label">Stroke &amp; shape</div>
+              <div class="row tight" style="margin-top: 0;">
+                <div class="field">
+                  <svg class="icon" viewBox="0 0 24 24" fill="currentColor">
+                    <rect x="3" y="6" width="18" height="2" /><rect x="3" y="11" width="18" height="3" /><rect x="3" y="17" width="18" height="4" />
+                  </svg>
+                  <input type="number" id="stroke-width" value="4" min="0" max="40" step="1" />
+                </div>
+                <div class="field">
+                  <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4">
+                    <path d="M4 20 V12 A8 8 0 0 1 12 4 H20" stroke-linecap="round" />
+                  </svg>
+                  <input type="number" id="radius" value="20" min="0" max="200" step="1" />
+                </div>
+                <div class="field">
+                  <svg class="icon" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.4">
+                    <path d="M3 12 H7 M11 12 H15 M19 12 H21" stroke-linecap="round" />
+                  </svg>
+                  <input type="number" id="dash" value="0" min="0" max="40" step="1" title="Dash gap (0 = solid)" />
+                </div>
+              </div>
+            </div>
+          </div>
         </div>
       </div>
 
@@ -2364,6 +2439,38 @@
           });
         });
       }
+
+      // -----------------------------------------------------------------
+      // Style settings popover
+      // -----------------------------------------------------------------
+      (function initStyleSettings() {
+        const btn = $('style-settings-trigger');
+        const panel = $('style-settings-panel');
+        if (!btn || !panel) return;
+        function close() {
+          panel.hidden = true;
+          btn.classList.remove('open');
+          btn.setAttribute('aria-expanded', 'false');
+        }
+        btn.addEventListener('click', (e) => {
+          e.stopPropagation();
+          const willOpen = panel.hidden;
+          close();
+          if (willOpen) {
+            panel.hidden = false;
+            btn.classList.add('open');
+            btn.setAttribute('aria-expanded', 'true');
+          }
+        });
+        document.addEventListener('pointerdown', (e) => {
+          if (!panel.hidden && !btn.contains(e.target) && !panel.contains(e.target)) {
+            close();
+          }
+        }, true);
+        document.addEventListener('keydown', (e) => {
+          if (e.key === 'Escape' && !panel.hidden) close();
+        });
+      })();
 
       // -----------------------------------------------------------------
       // Init
