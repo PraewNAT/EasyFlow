@@ -760,9 +760,9 @@ async function createFlow(meta: FlowMeta): Promise<VectorNode> {
 function arrowTypeToStrokeCap(t: ArrowType): StrokeCap {
   switch (t) {
     case 'none':         return 'NONE';
-    case 'open':         return 'ARROW_LINES';
+    case 'open':         return 'LINE_ARROW';
     case 'arrow':        return 'ARROW_EQUILATERAL';
-    case 'triangle-rev': return 'NONE';
+    case 'triangle-rev': return 'TRIANGLE_FILLED';
     case 'circle':       return 'CIRCLE_FILLED';
     case 'diamond':      return 'DIAMOND_FILLED';
     default:             return 'NONE';
@@ -1467,13 +1467,14 @@ function openArrow(tip: Point, outwardDir: Point, size: number, sw: number, pain
 }
 
 function triangleArrowRev(tip: Point, outwardDir: Point, size: number, paint: Paint): SceneNode {
-  const inwardTip = { x: tip.x - outwardDir.x * size, y: tip.y - outwardDir.y * size };
+  // Apex goes toward source (outwardDir), flat base sits at the endpoint
+  const revTip = { x: tip.x + outwardDir.x * size, y: tip.y + outwardDir.y * size };
   const perp = { x: -outwardDir.y, y: outwardDir.x };
   const h = size * 0.6;
   const p2 = { x: tip.x + perp.x * h, y: tip.y + perp.y * h };
   const p3 = { x: tip.x - perp.x * h, y: tip.y - perp.y * h };
   const v = figma.createVector();
-  v.vectorPaths = [{ windingRule: 'NONZERO', data: `M ${inwardTip.x} ${inwardTip.y} L ${p2.x} ${p2.y} L ${p3.x} ${p3.y} Z` }];
+  v.vectorPaths = [{ windingRule: 'NONZERO', data: `M ${revTip.x} ${revTip.y} L ${p2.x} ${p2.y} L ${p3.x} ${p3.y} Z` }];
   v.fills = [paint]; v.strokes = []; v.name = 'cap-arrow-rev';
   return v;
 }
