@@ -1045,6 +1045,52 @@
         -webkit-appearance: none;
         margin: 0;
       }
+      .ss-field select {
+        border: 0;
+        outline: 0;
+        background: transparent;
+        font-size: 11px;
+        color: var(--text);
+        font-family: inherit;
+        min-width: 0;
+        flex: 1;
+        cursor: pointer;
+      }
+      .ss-field .swatch {
+        width: 16px;
+        height: 16px;
+        border-radius: 3px;
+        border: 1px solid var(--border-strong);
+        flex-shrink: 0;
+        cursor: pointer;
+        position: relative;
+        overflow: hidden;
+      }
+      .ss-field .swatch input[type='color'] {
+        position: absolute;
+        inset: -4px;
+        opacity: 0;
+        cursor: pointer;
+        border: 0;
+        padding: 0;
+      }
+      .ss-field .divider {
+        width: 1px;
+        height: 14px;
+        background: var(--border);
+        flex-shrink: 0;
+      }
+      .ss-field input[type='text'] {
+        border: 0;
+        outline: 0;
+        background: transparent;
+        font-size: 11px;
+        color: var(--text);
+        font-family: inherit;
+        width: 44px;
+        min-width: 0;
+        padding: 0;
+      }
     </style>
   </head>
 
@@ -1375,49 +1421,80 @@
           <svg class="icon" viewBox="0 0 24 24" fill="currentColor">
             <text x="2" y="18" font-size="14" font-weight="700">tT</text>
           </svg>
-          <input
-            type="number"
-            id="font-size"
-            value="16"
-            min="4"
-            max="200"
-            step="1"
-          />
+          <input type="number" id="font-size" value="16" min="4" max="200" step="1" />
         </div>
-      </div>
-
-      <div class="row label-attrs-row">
-        <div class="field">
-          <svg class="icon" viewBox="0 0 24 24" fill="currentColor">
-            <text x="4" y="18" font-size="16" font-weight="700">B</text>
-          </svg>
-          <select id="font-weight">
-            <option>Thin</option>
-            <option>Light</option>
-            <option selected>Regular</option>
-            <option>Medium</option>
-            <option>Semi Bold</option>
-            <option>Bold</option>
-            <option>Black</option>
-          </select>
-        </div>
-        <div class="field" title="Text color">
-          <svg class="icon" viewBox="0 0 24 24" fill="currentColor">
-            <path d="M2 20h20v3H2zM5.5 17l1.41-3.5h6.18L14.5 17h2.5L11.25 3h-2.5L3 17h2.5zm4.5-12.78L12.36 11H7.64L10 4.22z" />
-          </svg>
-          <input type="text" id="text-color" value="000000" maxlength="6" inputmode="text" autocomplete="off" spellcheck="false" />
-          <span class="swatch" style="background: #000;">
-            <input type="color" id="text-color-picker" value="#000000" />
-          </span>
-        </div>
-        <div class="field" title="Label background color">
-          <svg class="icon" viewBox="0 0 24 24" fill="currentColor">
-            <path d="M16.56 8.94 7.62 0 6.21 1.41l2.38 2.38-5.15 5.15a1.49 1.49 0 0 0 0 2.12l5.5 5.5a1.49 1.49 0 0 0 2.12 0l5.5-5.5a1.49 1.49 0 0 0 0-2.12zM5.21 10 10 5.21 14.79 10zm14.29.04s-2 2.17-2 3.5a2 2 0 0 0 4 0c0-1.33-2-3.5-2-3.5zM2 22h20v-3H2z" />
-          </svg>
-          <input type="text" id="label-bg-color" value="ffffff" maxlength="6" inputmode="text" autocomplete="off" spellcheck="false" />
-          <span class="swatch" style="background: #fff;">
-            <input type="color" id="label-bg-picker" value="#ffffff" />
-          </span>
+        <div class="style-settings-wrap">
+          <button
+            type="button"
+            class="style-settings-btn"
+            id="label-settings-trigger"
+            aria-expanded="false"
+            aria-haspopup="true"
+            title="Font &amp; color settings"
+          >
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round">
+              <line x1="4" y1="6" x2="20" y2="6"/>
+              <circle cx="8" cy="6" r="2" fill="currentColor" stroke="none"/>
+              <line x1="4" y1="12" x2="20" y2="12"/>
+              <circle cx="16" cy="12" r="2" fill="currentColor" stroke="none"/>
+              <line x1="4" y1="18" x2="20" y2="18"/>
+              <circle cx="10" cy="18" r="2" fill="currentColor" stroke="none"/>
+            </svg>
+          </button>
+          <div class="style-settings-panel" id="label-settings-panel" hidden>
+            <!-- Font weight -->
+            <div class="ss-row">
+              <span class="ss-row-label">Font weight</span>
+              <div class="ss-row-control">
+                <div class="ss-field">
+                  <svg class="icon" viewBox="0 0 24 24" fill="currentColor">
+                    <text x="4" y="18" font-size="16" font-weight="700">B</text>
+                  </svg>
+                  <select id="font-weight">
+                    <option>Thin</option>
+                    <option>Light</option>
+                    <option selected>Regular</option>
+                    <option>Medium</option>
+                    <option>Semi Bold</option>
+                    <option>Bold</option>
+                    <option>Black</option>
+                  </select>
+                </div>
+              </div>
+            </div>
+            <!-- Text color -->
+            <div class="ss-row">
+              <span class="ss-row-label">Text color</span>
+              <div class="ss-row-control">
+                <div class="ss-field">
+                  <svg class="icon" viewBox="0 0 24 24" fill="currentColor">
+                    <path d="M2 20h20v3H2zM5.5 17l1.41-3.5h6.18L14.5 17h2.5L11.25 3h-2.5L3 17h2.5zm4.5-12.78L12.36 11H7.64L10 4.22z" />
+                  </svg>
+                  <input type="text" id="text-color" value="000000" maxlength="6" inputmode="text" autocomplete="off" spellcheck="false" />
+                  <span class="divider"></span>
+                  <span class="swatch" style="background: #000;">
+                    <input type="color" id="text-color-picker" value="#000000" />
+                  </span>
+                </div>
+              </div>
+            </div>
+            <!-- Background color -->
+            <div class="ss-row">
+              <span class="ss-row-label">Background</span>
+              <div class="ss-row-control">
+                <div class="ss-field">
+                  <svg class="icon" viewBox="0 0 24 24" fill="currentColor">
+                    <path d="M16.56 8.94 7.62 0 6.21 1.41l2.38 2.38-5.15 5.15a1.49 1.49 0 0 0 0 2.12l5.5 5.5a1.49 1.49 0 0 0 2.12 0l5.5-5.5a1.49 1.49 0 0 0 0-2.12zM5.21 10 10 5.21 14.79 10zm14.29.04s-2 2.17-2 3.5a2 2 0 0 0 4 0c0-1.33-2-3.5-2-3.5zM2 22h20v-3H2z" />
+                  </svg>
+                  <input type="text" id="label-bg-color" value="ffffff" maxlength="6" inputmode="text" autocomplete="off" spellcheck="false" />
+                  <span class="divider"></span>
+                  <span class="swatch" style="background: #fff;">
+                    <input type="color" id="label-bg-picker" value="#ffffff" />
+                  </span>
+                </div>
+              </div>
+            </div>
+          </div>
         </div>
       </div>
       </div>
@@ -2501,6 +2578,36 @@
       }
 
       // -----------------------------------------------------------------
+      // Label settings popover
+      (function initLabelSettings() {
+        const btn = $('label-settings-trigger');
+        const panel = $('label-settings-panel');
+        if (!btn || !panel) return;
+        function close() {
+          panel.hidden = true;
+          btn.classList.remove('open');
+          btn.setAttribute('aria-expanded', 'false');
+        }
+        btn.addEventListener('click', (e) => {
+          e.stopPropagation();
+          const willOpen = panel.hidden;
+          close();
+          if (willOpen) {
+            panel.hidden = false;
+            btn.classList.add('open');
+            btn.setAttribute('aria-expanded', 'true');
+          }
+        });
+        document.addEventListener('pointerdown', (e) => {
+          if (!panel.hidden && !btn.contains(e.target) && !panel.contains(e.target)) {
+            close();
+          }
+        }, true);
+        document.addEventListener('keydown', (e) => {
+          if (e.key === 'Escape' && !panel.hidden) close();
+        });
+      })();
+
       // Style settings popover
       // -----------------------------------------------------------------
       (function initStyleSettings() {
