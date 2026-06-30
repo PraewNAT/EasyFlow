@@ -621,6 +621,29 @@
         background: var(--surface-2);
         border-bottom: 1px solid var(--border);
       }
+      .anchor-empty[hidden] { display: none; }
+      .anchor-empty {
+        grid-column: 1 / -1;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        gap: 6px;
+        padding: 8px 0;
+        text-align: center;
+      }
+      .anchor-empty .anchor-empty-title {
+        font-size: 12px;
+        font-weight: 600;
+        color: var(--text);
+      }
+      .anchor-empty .anchor-empty-desc {
+        font-size: 11px;
+        color: var(--text-muted);
+        line-height: 1.5;
+      }
+      /* author display:flex beats the UA display:none for [hidden] — make it explicit */
+      .anchor-frame[hidden] { display: none; }
       .anchor-frame {
         position: relative;
         aspect-ratio: 1.4;
@@ -1261,7 +1284,11 @@
     </section>
 
     <!-- Anchor area -->
-    <div class="anchor-area">
+    <div class="anchor-area" id="anchor-area">
+      <div class="anchor-empty" id="anchor-empty" hidden>
+        <div class="anchor-empty-title">How to connect objects</div>
+        <div class="anchor-empty-desc">Select an object → hold Shift<br>→ select another</div>
+      </div>
       <div class="anchor-frame" id="from-frame">
         Start
         <span class="anchor-dot" data-end="from" data-side="top"></span>
@@ -1521,10 +1548,7 @@
       </div>
     </section>
 
-    <section class="section help-section">
-      <div class="help-title">How to connect objects</div>
-      <div>Select an object → hold Shift → select another.</div>
-    </section>
+
 
     <script>
       // -----------------------------------------------------------------
@@ -2028,6 +2052,14 @@
         // when a flow is selected (creating a flow selects it too).
         const labelSection = $('label-section');
         if (labelSection) labelSection.hidden = !(mode === 'one-flow' || mode === 'multi-flow');
+        // Show help placeholder in anchor area when nothing is selected
+        const showFrames = mode === 'one-flow' || mode === 'two-frames' || mode === 'multi-flow';
+        const anchorEmpty = $('anchor-empty');
+        const fromFrame = $('from-frame');
+        const toFrame = $('to-frame');
+        if (anchorEmpty) anchorEmpty.hidden = showFrames;
+        if (fromFrame) fromFrame.hidden = !showFrames;
+        if (toFrame) toFrame.hidden = !showFrames;
         renderAnchorDots();
         renderArrowPreviews();
         renderEndpointInfo();
